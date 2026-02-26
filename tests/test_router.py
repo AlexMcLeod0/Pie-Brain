@@ -7,12 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from core.router import Router, RouterOutput
 
 
-def make_router() -> Router:
+def make_router(max_retries: int = 3, timeout: float = 300.0) -> Router:
     sem = asyncio.Semaphore(1)
     return Router(
         model="qwen2.5:1.5b",
         user_prefs_path="/nonexistent/prefs.md",
         llm_semaphore=sem,
+        max_retries=max_retries,
+        timeout=timeout,
     )
 
 
@@ -69,3 +71,30 @@ async def test_route_calls_ollama():
 
     assert result.tool_name == "arxiv"
     assert result.handoff is False
+
+
+async def test_route_retries_on_transient_error():
+    """A single transient failure is retried and the second attempt succeeds."""
+    router = make_router(max_retries=3)
+    expected = {"tool_name": "arxiv", "params": {"query": "RL"}, "handoff": False}
+    mock_response = {"message": {"content": json.dumps(expected)}}
+
+    with patch.object(
+        router.client, "chat",
+        new=AsyncMock(side_effect=[asyncio.TimeoutError(), mock_response]),
+    ):
+        result = await router.route("Find papers on RL")
+
+    assert result.tool_name == "arxiv"
+
+
+async def test_route_raises_after_all_retries_exhausted():
+    """RuntimeError is raised when every retry attempt fails."""
+    router = make_router(max_retries=2)
+
+    with patch.object(
+        router.client, "chat",
+        new=AsyncMock(side_effect=asyncio.TimeoutError()),
+    ):
+        with pytest.raises(RuntimeError, match="failed after 2 attempt"):
+            await router.route("Find papers on RL")
