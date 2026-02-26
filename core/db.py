@@ -29,6 +29,7 @@ class TaskStatus(str, Enum):
     routing = "routing"
     executing = "executing"
     done = "done"
+    failed = "failed"
 
 
 class Task(BaseModel):
@@ -108,6 +109,11 @@ async def update_task_status(
             await db.execute(
                 "UPDATE tasks SET status=?, tool_name=? WHERE id=?",
                 (status.value, tool_name, task_id),
+            )
+        elif metadata is not None:
+            await db.execute(
+                "UPDATE tasks SET status=?, metadata=? WHERE id=?",
+                (status.value, json.dumps(metadata), task_id),
             )
         else:
             await db.execute(

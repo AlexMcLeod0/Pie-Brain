@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # Ollama
     ollama_model: str = "qwen2.5:1.5b"
     ollama_base_url: str = "http://localhost:11434"
+    ollama_timeout: int = 300  # seconds; generous for CPU-bound Pi 4
+    ollama_max_retries: int = 3
 
     # Paths
     db_path: str = "~/.pie-brain/tasks.db"

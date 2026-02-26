@@ -88,3 +88,16 @@ async def test_completed_without_chat_id_not_returned(db):
     await update_task_status(db, task_id, TaskStatus.done)
     tasks = await get_completed_unnotified(db)
     assert not any(t.id == task_id for t in tasks)
+
+
+async def test_failed_status_persists_error_metadata(db):
+    task_id = await enqueue_task(db, "a task that will fail")
+    await update_task_status(
+        db, task_id, TaskStatus.failed,
+        metadata={"error": "Ollama failed after 3 attempt(s)"},
+    )
+    task = await get_task_by_id(db, task_id)
+    assert task is not None
+    assert task.status == TaskStatus.failed
+    assert "error" in task.metadata
+    assert "Ollama" in task.metadata["error"]

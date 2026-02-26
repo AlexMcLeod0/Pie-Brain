@@ -29,6 +29,8 @@ class Engine:
             user_prefs_path=self.settings.user_prefs_path,
             llm_semaphore=self.llm_sem,
             base_url=self.settings.ollama_base_url,
+            timeout=self.settings.ollama_timeout,
+            max_retries=self.settings.ollama_max_retries,
         )
         self.brain_registry = BrainRegistry(cloud_brain_semaphore=self.brain_sem)
         self._running = False
@@ -88,7 +90,10 @@ class Engine:
 
         except Exception as exc:
             logger.exception("Task %d failed: %s", task.id, exc)
-            await update_task_status(db, task.id, TaskStatus.done)
+            await update_task_status(
+                db, task.id, TaskStatus.failed,
+                metadata={"error": str(exc)},
+            )
 
     async def _spawn_brain(self, tool_name: str, params: dict) -> None:
         """Spawn a cloud brain subprocess; uses nohup for harness-restart survival."""
