@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     request_text TEXT    NOT NULL,
     status      TEXT    NOT NULL DEFAULT 'pending',
     tool_name   TEXT,
-    metadata    TEXT    DEFAULT '{}'
+    metadata    TEXT    DEFAULT '{}',
+    chat_id     INTEGER,
+    notified    INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -35,6 +37,8 @@ class Task(BaseModel):
     status: TaskStatus = TaskStatus.pending
     tool_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    chat_id: int | None = None
+    notified: bool = False
 
     @classmethod
     def from_row(cls, row: aiosqlite.Row) -> "Task":
@@ -44,6 +48,8 @@ class Task(BaseModel):
             status=TaskStatus(row["status"]),
             tool_name=row["tool_name"],
             metadata=json.loads(row["metadata"] or "{}"),
+            chat_id=row["chat_id"],
+            notified=bool(row["notified"]),
         )
 
 
@@ -56,12 +62,17 @@ async def init_db(db_path: str) -> None:
     logger.info("Database initialised at %s", db_path)
 
 
-async def enqueue_task(db_path: str, request_text: str, metadata: dict | None = None) -> int:
+async def enqueue_task(
+    db_path: str,
+    request_text: str,
+    metadata: dict | None = None,
+    chat_id: int | None = None,
+) -> int:
     """Insert a new pending task; returns its id."""
     async with aiosqlite.connect(db_path) as db:
         cursor = await db.execute(
-            "INSERT INTO tasks (request_text, status, metadata) VALUES (?, ?, ?)",
-            (request_text, TaskStatus.pending.value, json.dumps(metadata or {})),
+            "INSERT INTO tasks (request_text, status, metadata, chat_id) VALUES (?, ?, ?, ?)",
+            (request_text, TaskStatus.pending.value, json.dumps(metadata or {}), chat_id),
         )
         await db.commit()
         return cursor.lastrowid  # type: ignore[return-value]
@@ -103,6 +114,34 @@ async def update_task_status(
                 "UPDATE tasks SET status=? WHERE id=?",
                 (status.value, task_id),
             )
+        await db.commit()
+
+
+async def get_task_by_id(db_path: str, task_id: int) -> Task | None:
+    """Fetch a single task by id, or None if not found."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)) as cursor:
+            row = await cursor.fetchone()
+    return Task.from_row(row) if row else None
+
+
+async def get_completed_unnotified(db_path: str) -> list[Task]:
+    """Return done tasks that have a chat_id but haven't been notified yet."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM tasks WHERE status = ? AND chat_id IS NOT NULL AND notified = 0",
+            (TaskStatus.done.value,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [Task.from_row(r) for r in rows]
+
+
+async def mark_notified(db_path: str, task_id: int) -> None:
+    """Set notified=1 for a task."""
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("UPDATE tasks SET notified = 1 WHERE id = ?", (task_id,))
         await db.commit()
 
 

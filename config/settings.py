@@ -33,6 +33,10 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: str = ""
+    # Comma-separated list of allowed Telegram user IDs (empty = allow all — not recommended)
+    telegram_allowed_user_ids: list[int] = []
+    # How often (seconds) the bot polls for completed tasks to deliver results
+    telegram_result_poll_interval: int = 5
 
     @field_validator("db_path", "log_dir", "brain_inbox", "user_prefs_path", mode="before")
     @classmethod
