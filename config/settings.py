@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     ollama_timeout: int = 300  # seconds; generous for CPU-bound Pi 4
     ollama_max_retries: int = 3
 
+    # ArXiv
+    arxiv_discover_keywords: list[str] = [
+        "large language models",
+        "reinforcement learning",
+        "computer vision",
+    ]
+
     # Paths
     db_path: str = "~/.pie-brain/tasks.db"
     log_dir: str = "~/.pie-brain/logs"
