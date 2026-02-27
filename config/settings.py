@@ -30,6 +30,10 @@ class Settings(BaseSettings):
         "computer vision",
     ]
 
+    # Memory / LanceDB
+    memory_db_path: str = "~/.pie-brain/memory"
+    memory_embedding_model: str = "all-MiniLM-L6-v2"
+
     # Paths
     db_path: str = "~/.pie-brain/tasks.db"
     log_dir: str = "~/.pie-brain/logs"
@@ -47,7 +51,7 @@ class Settings(BaseSettings):
     # How often (seconds) the bot polls for completed tasks to deliver results
     telegram_result_poll_interval: int = 5
 
-    @field_validator("db_path", "log_dir", "brain_inbox", "user_prefs_path", mode="before")
+    @field_validator("db_path", "log_dir", "brain_inbox", "user_prefs_path", "memory_db_path", mode="before")
     @classmethod
     def expand_path(cls, v: str) -> str:
         return str(Path(v).expanduser())
