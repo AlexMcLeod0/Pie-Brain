@@ -771,21 +771,28 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
-    { name = "arxiv" },
-    { name = "lancedb" },
     { name = "ollama" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "python-telegram-bot" },
     { name = "pyyaml" },
-    { name = "sentence-transformers" },
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-mock" },
+arxiv = [
+    { name = "arxiv" },
+]
+full = [
+    { name = "arxiv" },
+    { name = "lancedb" },
+    { name = "python-telegram-bot" },
+    { name = "sentence-transformers" },
+]
+memory = [
+    { name = "lancedb" },
+    { name = "sentence-transformers" },
+]
+telegram = [
+    { name = "python-telegram-bot" },
 ]
 
 [package.dev-dependencies]
@@ -798,19 +805,20 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
-    { name = "arxiv", specifier = ">=2.1.0" },
-    { name = "lancedb", specifier = ">=0.6.0" },
+    { name = "arxiv", marker = "extra == 'arxiv'", specifier = ">=2.1.0" },
+    { name = "arxiv", marker = "extra == 'full'", specifier = ">=2.1.0" },
+    { name = "lancedb", marker = "extra == 'full'", specifier = ">=0.6.0" },
+    { name = "lancedb", marker = "extra == 'memory'", specifier = ">=0.6.0" },
     { name = "ollama", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12" },
-    { name = "python-telegram-bot", specifier = ">=21.0" },
+    { name = "python-telegram-bot", marker = "extra == 'full'", specifier = ">=21.0" },
+    { name = "python-telegram-bot", marker = "extra == 'telegram'", specifier = ">=21.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "sentence-transformers", specifier = ">=2.7.0" },
+    { name = "sentence-transformers", marker = "extra == 'full'", specifier = ">=2.7.0" },
+    { name = "sentence-transformers", marker = "extra == 'memory'", specifier = ">=2.7.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["arxiv", "memory", "telegram", "full"]
 
 [package.metadata.requires-dev]
 dev = [
