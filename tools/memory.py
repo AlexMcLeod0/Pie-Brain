@@ -112,7 +112,9 @@ class MemoryTool(BaseTool):
         )
 
         content = self._format_results(query_text, results)
-        out_path = Path(settings.brain_inbox) / "memory_query.md"
+        task_id = params.get("_task_id")
+        prefix = f"{task_id}_" if task_id is not None else ""
+        out_path = Path(settings.brain_inbox) / f"{prefix}memory_query.md"
         atomic_write(out_path, content)
         logger.info("Memory query results written to %s", out_path)
 

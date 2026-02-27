@@ -6,6 +6,7 @@ from core.db import (
     enqueue_task,
     get_completed_unnotified,
     get_pending_tasks,
+    get_recent_tasks,
     get_task_by_id,
     init_db,
     mark_notified,
@@ -88,6 +89,28 @@ async def test_completed_without_chat_id_not_returned(db):
     await update_task_status(db, task_id, TaskStatus.done)
     tasks = await get_completed_unnotified(db)
     assert not any(t.id == task_id for t in tasks)
+
+
+async def test_get_recent_tasks_returns_newest_first(db):
+    id1 = await enqueue_task(db, "first task")
+    id2 = await enqueue_task(db, "second task")
+    id3 = await enqueue_task(db, "third task")
+    tasks = await get_recent_tasks(db, limit=2)
+    assert len(tasks) == 2
+    assert tasks[0].id == id3  # newest first
+    assert tasks[1].id == id2
+
+
+async def test_get_recent_tasks_respects_limit(db):
+    for i in range(10):
+        await enqueue_task(db, f"task {i}")
+    tasks = await get_recent_tasks(db, limit=3)
+    assert len(tasks) == 3
+
+
+async def test_get_recent_tasks_empty_db(db):
+    tasks = await get_recent_tasks(db)
+    assert tasks == []
 
 
 async def test_failed_status_persists_error_metadata(db):

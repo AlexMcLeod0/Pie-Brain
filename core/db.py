@@ -151,6 +151,17 @@ async def mark_notified(db_path: str, task_id: int) -> None:
         await db.commit()
 
 
+async def get_recent_tasks(db_path: str, limit: int = 5) -> list[Task]:
+    """Fetch the most recently created tasks, newest first."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM tasks ORDER BY id DESC LIMIT ?", (limit,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [Task.from_row(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------

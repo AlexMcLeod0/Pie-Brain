@@ -84,7 +84,9 @@ class Engine:
                 if tool_cls is None:
                     raise ValueError(f"Unknown tool: {router_output.tool_name!r}")
                 tool = tool_cls()
-                await tool.run_local(router_output.params)
+                # Inject task ID so tools can name output files unambiguously
+                params = {**router_output.params, "_task_id": task.id}
+                await tool.run_local(params)
 
             await update_task_status(db, task.id, TaskStatus.done)
 
