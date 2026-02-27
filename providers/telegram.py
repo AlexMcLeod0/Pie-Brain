@@ -10,6 +10,7 @@ from config.settings import get_settings
 from core.db import (
     enqueue_task,
     get_completed_unnotified,
+    get_recent_tasks,
     get_task_by_id,
     mark_notified,
 )
@@ -32,9 +33,19 @@ class TelegramProvider:
         self.app = (
             Application.builder()
             .token(self.settings.telegram_bot_token)
+            .post_init(self._on_startup)
             .build()
         )
         self._register_handlers()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def _on_startup(self, application: Application) -> None:
+        """Registered as post_init hook — runs inside run_polling()'s event loop."""
+        asyncio.create_task(self._deliver_results())
+        logger.info("Result-delivery background task started.")
 
     # ------------------------------------------------------------------
     # Handlers
@@ -87,9 +98,17 @@ class TelegramProvider:
                     f"Request: {task.request_text[:120]}"
                 )
         else:
-            await update.message.reply_text(
-                "Pass a task ID: /status 42"
-            )
+            tasks = await get_recent_tasks(self.settings.db_path, limit=5)
+            if not tasks:
+                await update.message.reply_text("No tasks yet.")
+                return
+            lines = ["Recent tasks (newest first):"]
+            for t in tasks:
+                snippet = t.request_text[:60]
+                if len(t.request_text) > 60:
+                    snippet += "…"
+                lines.append(f"#{t.id} [{t.status.value}] {snippet}")
+            await update.message.reply_text("\n".join(lines))
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if update.message is None or update.effective_user is None:
@@ -124,16 +143,18 @@ class TelegramProvider:
 
     async def _send_result(self, bot: Bot, task) -> None:
         """Send the completed task result to the originating chat."""
-        # Look for a matching Markdown file in the inbox
         inbox = Path(self.settings.brain_inbox)
         result_text = f"Task #{task.id} complete (tool: {task.tool_name or 'unknown'})."
 
-        # Check for any inbox file written for this task (simple heuristic: newest file)
+        # Look for output files written by this specific task (prefixed with task id)
         if inbox.exists():
-            candidates = sorted(inbox.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            candidates = sorted(
+                inbox.glob(f"{task.id}_*.md"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
             if candidates:
                 content = candidates[0].read_text(encoding="utf-8")
-                # Truncate to Telegram's 4096-char message limit
                 if len(content) > 4000:
                     content = content[:4000] + "\n\n…(truncated)"
                 result_text = content
@@ -150,8 +171,6 @@ class TelegramProvider:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Start polling + result-delivery background loop (blocking)."""
+        """Start polling and result-delivery loop (blocking)."""
         logger.info("Telegram bot starting…")
-        loop = asyncio.get_event_loop()
-        loop.create_task(self._deliver_results())
         self.app.run_polling()

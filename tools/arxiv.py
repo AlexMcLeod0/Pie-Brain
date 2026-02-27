@@ -58,7 +58,7 @@ class ArxivTool(BaseTool):
         papers = await asyncio.to_thread(list, client.results(search))
 
         content = self._format_papers(f"ArXiv: {query or paper_id}", papers)
-        self._write_output(f"arxiv_search_{slug}.md", content)
+        self._write_output(f"arxiv_search_{slug}.md", content, params.get("_task_id"))
 
     async def _daily_discover(self, params: dict) -> None:
         """Fetch papers submitted in the last 24 h matching user interests."""
@@ -96,7 +96,7 @@ class ArxivTool(BaseTool):
             papers,
             generated_at=generated_at,
         )
-        self._write_output("arxiv_daily_discover.md", content)
+        self._write_output("arxiv_daily_discover.md", content, params.get("_task_id"))
 
     # ------------------------------------------------------------------
 
@@ -146,8 +146,9 @@ class ArxivTool(BaseTool):
 
         return "\n".join(lines)
 
-    def _write_output(self, filename: str, content: str) -> None:
+    def _write_output(self, filename: str, content: str, task_id: int | None = None) -> None:
         settings = get_settings()
-        out_path = Path(settings.brain_inbox) / filename
+        prefix = f"{task_id}_" if task_id is not None else ""
+        out_path = Path(settings.brain_inbox) / f"{prefix}{filename}"
         atomic_write(out_path, content)
         logger.info("ArXiv output written to %s", out_path)
