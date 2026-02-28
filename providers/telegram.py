@@ -6,6 +6,7 @@ from pathlib import Path
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
+import guardian
 from config.settings import get_settings
 from core.db import (
     enqueue_task,
@@ -120,6 +121,12 @@ class TelegramProvider:
         text = update.message.text or ""
         chat_id = update.effective_chat.id if update.effective_chat else None
         logger.info("Telegram message from user_id=%d: %r", update.effective_user.id, text)
+
+        ok, reason = guardian.validate_message(text)
+        if not ok:
+            logger.warning("Guardian: rejected message from user_id=%d: %s", update.effective_user.id, reason)
+            await update.message.reply_text(f"Message rejected: {reason}")
+            return
 
         task_id = await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
         await update.message.reply_text(f"Task #{task_id} queued.")

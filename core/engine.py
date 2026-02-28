@@ -3,6 +3,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+import guardian
 from config.settings import get_settings
 from core.db import (
     TaskStatus,
@@ -40,11 +41,25 @@ class Engine:
         setup_logging(self.settings.log_dir)
         await init_db(self.settings.db_path)
         self._running = True
+
+        # Validate all registered modules at startup
+        guardian.validate_registries(TOOL_REGISTRY, self.brain_registry)
+
         logger.info(
             "Engine started. model=%s brain=%s",
             self.settings.ollama_model,
             self.settings.default_cloud_brain,
         )
+
+        # Start hot-module watcher
+        asyncio.create_task(
+            guardian.watch_for_new_modules(
+                TOOL_REGISTRY,
+                self.brain_registry,
+                poll_interval=self.settings.guardian_poll_interval,
+            )
+        )
+
         while self._running:
             tasks = await get_pending_tasks(self.settings.db_path)
             for task in tasks:
@@ -104,6 +119,12 @@ class Engine:
 
         # Wrap in nohup so the child outlives a harness restart
         full_cmd = f"nohup {cmd_str} &"
+
+        # Safety check before execution
+        result = guardian.check_spawn_cmd(full_cmd)
+        if not result.ok:
+            raise RuntimeError(f"spawn blocked by guardian: {'; '.join(result.violations)}")
+
         logger.info("Spawning brain: %s", full_cmd)
 
         async with self.brain_sem:

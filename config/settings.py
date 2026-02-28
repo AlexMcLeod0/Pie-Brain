@@ -51,10 +51,21 @@ class Settings(BaseSettings):
     # How often (seconds) the bot polls for completed tasks to deliver results
     telegram_result_poll_interval: int = 5
 
-    @field_validator("db_path", "log_dir", "brain_inbox", "user_prefs_path", "memory_db_path", mode="before")
+    # Guardian
+    guardian_poll_interval: int = 60
+    guardian_allowed_write_paths: list[str] = ["~/brain", "~/.pie-brain"]
+
+    @field_validator(
+        "db_path", "log_dir", "brain_inbox", "user_prefs_path", "memory_db_path", mode="before"
+    )
     @classmethod
     def expand_path(cls, v: str) -> str:
         return str(Path(v).expanduser())
+
+    @field_validator("guardian_allowed_write_paths", mode="before")
+    @classmethod
+    def expand_paths(cls, v: list) -> list[str]:
+        return [str(Path(p).expanduser()) for p in v]
 
     @classmethod
     def from_yaml(cls, path: str | Path = "config.yaml") -> "Settings":
