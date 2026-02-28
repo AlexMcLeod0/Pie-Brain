@@ -4,6 +4,21 @@
 #        curl -fsSL https://raw.githubusercontent.com/AlexMcLeod0/Pie-Brain/main/setup.sh | bash
 set -euo pipefail
 
+# ─── TTY guard ────────────────────────────────────────────────────────────────
+# When the script is fed through a pipe (e.g. curl | bash) bash reads the
+# script from stdin.  Any `read` built-in would then consume lines from the
+# *script itself* rather than from the keyboard, causing prompts to be skipped
+# and downstream syntax errors.  Redirect stdin to the real terminal early so
+# every `read` talks to the user, not the pipe.
+if [[ ! -t 0 ]]; then
+    if [[ ! -e /dev/tty ]]; then
+        echo "[✗] This installer needs an interactive terminal." >&2
+        echo "    Download setup.sh and run it directly: bash setup.sh" >&2
+        exit 1
+    fi
+    exec </dev/tty
+fi
+
 # ─── Colours & helpers ────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -60,7 +75,7 @@ else
     UV_BIN="${HOME}/.local/bin/uv"
 fi
 export PATH="${HOME}/.local/bin:${PATH}"
-success "uv found at ${UV_BIN}."
+success "uv found at ${UV_BIN}"
 
 # ─── Install directory ────────────────────────────────────────────────────────
 echo
@@ -218,7 +233,8 @@ fi
 ARXIV_KEYWORDS=""
 if [[ " ${TOOLS[*]} " == *" arxiv "* ]]; then
     echo
-    read -rp "  ArXiv discovery keywords, comma-separated\n  [large language models,reinforcement learning]: " _kw
+    echo "  ArXiv discovery keywords, comma-separated"
+    read -rp "  [large language models,reinforcement learning]: " _kw
     ARXIV_KEYWORDS="${_kw:-large language models,reinforcement learning}"
 fi
 
