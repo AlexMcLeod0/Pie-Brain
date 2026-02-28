@@ -51,3 +51,17 @@ pie-brain/
 * Brain Registration: Create a BrainRegistry that auto-loads any brain defined in /brains (e.g., claude_code.py, aider.py).
 * Manifest Control: Use pydantic-settings to allow the user to toggle DEFAULT_CLOUD_BRAIN via an environment variable or config.yaml.
 * Handoff Encapsulation: The Harness must never call a cloud tool directly; it must request a command string from the ActiveBrain instance and execute it via asyncio.create_subprocess_exec.
+
+### 7. The "Guardian" Verification Module
+#### Objective: A pre-flight check system that validates any new /tools or /providers before the Harness starts, and sanitizes outgoing spawn commands.
+1. Structural Validation (The Interface Check)
+   * Tool Schema: Use Python’s inspect or abc (Abstract Base Classes) to ensure every file in /tools implements name, keywords, and the execute() method.
+   * Provider Schema: Ensure providers (Telegram/Cron) have a standard push_to_queue() hook.
+   * Self-Test: On startup, the Harness should run a "Mock Task" through each tool to ensure they return valid Markdown/JSON without crashing.
+2. Security & Sandbox (The "No-Recursion" Rule)
+   * Command Sanitization: The Harness must regex-check any string destined for subprocess.run().
+   * Rule 1: No shell piping (|, ;, &&) unless explicitly whitelisted.
+   * Rule 2: Block recursive spawns (e.g., a tool calling the Harness itself in an infinite loop).
+   * Danger Zones: Flag any tool that attempts to write to system directories outside of your defined ~/brain or ~/repo paths.
+3. Message Integrity (The Queue Check)
+   * Format Enforcement: A validator.py middleware that sits between the Telegram Bot and the SQLite DB. It ensures the request_text is UTF-8 and within a 2000-character limit (to prevent Pi memory-overload attacks).
