@@ -8,7 +8,7 @@ A 1.5 B-parameter model running entirely on-device acts as an *intent router*: i
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/AlexMcLeod0/Pie-Brain/tests.yml?label=tests)](https://github.com/AlexMcLeod0/Pie-Brain/actions)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-GNU_Affero-green)](LICENSE)
 
 ---
 
@@ -102,8 +102,13 @@ Provider  ───────────────────────�
 
 ### Install
 
+First run:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AlexMcLeod0/Pie-Brain/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AlexMcLeod0/Pie-Brain/main/setup.sh -o setup.sh
+```
+Then run:
+```bash
+bash setup.sh
 ```
 
 The interactive installer will:
