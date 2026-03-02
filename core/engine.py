@@ -42,6 +42,15 @@ class Engine:
         await init_db(self.settings.db_path)
         self._running = True
 
+        # Start providers
+        if self.settings.telegram_bot_token:
+            try:
+                from providers.telegram import TelegramProvider
+                asyncio.create_task(TelegramProvider().run())
+                logger.info("Telegram provider started.")
+            except ImportError:
+                logger.warning("Telegram provider not available (not installed).")
+
         # Validate all registered modules at startup
         guardian.validate_registries(TOOL_REGISTRY, self.brain_registry)
 

@@ -89,15 +89,54 @@ read -rp "  Directory [${DEFAULT_INSTALL_DIR}]: " INSTALL_DIR
 INSTALL_DIR="${INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
 INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}"
 
+MODE="install"
 if [[ -d "$INSTALL_DIR" ]]; then
     warn "Directory '${INSTALL_DIR}' already exists."
-    read -rp "  Remove and reinstall? [y/N]: " _ow
-    case "$_ow" in
-        y|Y) ;;
-        *) die "Aborting. Choose a different directory or remove it manually." ;;
+    echo "  1) Update from source  — pull latest code, keep your settings  [default]"
+    echo "  2) Remove and reinstall — clean install (overwrites settings)"
+    echo "  3) Abort"
+    echo
+    read -rp "  Choice [1]: " _exist_choice
+    case "${_exist_choice:-1}" in
+        1) MODE="update" ;;
+        2)
+            [[ -n "$INSTALL_DIR" && "$INSTALL_DIR" != "/" ]] || die "Refusing to remove unsafe directory."
+            rm -rf "$INSTALL_DIR"
+            ;;
+        *) die "Aborting." ;;
     esac
-    [[ -n "$INSTALL_DIR" && "$INSTALL_DIR" != "/" ]] || die "Refusing to remove unsafe directory."
-    rm -rf "$INSTALL_DIR"
+fi
+
+# ─── Update path (early exit) ─────────────────────────────────────────────────
+if [[ "$MODE" == "update" ]]; then
+    echo
+    info "Updating Pie-Brain in ${INSTALL_DIR}…"
+
+    tmp_dir="$(mktemp -d)"
+    git clone --depth 1 "$REPO_URL" "$tmp_dir"
+    # Preserve .env, .env backups, and the existing virtualenv
+    rsync -a --delete \
+        --exclude='.env' \
+        --exclude='.env.bak.*' \
+        --exclude='.venv' \
+        "$tmp_dir/" "$INSTALL_DIR/"
+    rm -rf "$tmp_dir"
+    success "Code updated."
+
+    cd "$INSTALL_DIR"
+    info "Updating Python dependencies…"
+    "$UV_BIN" sync --extra full || die "Dependency update failed."
+    success "Dependencies updated."
+
+    echo
+    echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${RESET}"
+    echo -e "${GREEN}${BOLD}  Pie-Brain updated successfully!${RESET}"
+    echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${RESET}"
+    echo
+    echo "  Your settings in ${INSTALL_DIR}/.env were preserved."
+    echo "  Restart the engine to apply changes."
+    echo
+    exit 0
 fi
 
 # ─── Brain provider ───────────────────────────────────────────────────────────
