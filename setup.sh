@@ -286,7 +286,12 @@ fi
     echo "DEFAULT_CLOUD_BRAIN=${BRAIN}"
     echo "OLLAMA_MODEL=${OLLAMA_MODEL}"
     [[ -n "$TELEGRAM_TOKEN" ]]   && echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}"
-    [[ -n "$TELEGRAM_ALLOWED" ]] && echo "TELEGRAM_ALLOWED_USER_IDS=${TELEGRAM_ALLOWED}"
+    if [[ -n "$TELEGRAM_ALLOWED" ]]; then
+        _ids_json=$(python3 -c \
+            "import json,sys; ids=sys.argv[1].split(','); print(json.dumps([int(i.strip()) for i in ids if i.strip()]))" \
+            "$TELEGRAM_ALLOWED")
+        echo "TELEGRAM_ALLOWED_USER_IDS=${_ids_json}"
+    fi
     if [[ -n "$ARXIV_KEYWORDS" ]]; then
         # Convert "a, b, c" → JSON array for pydantic-settings
         _kw_json=$(python3 -c \
