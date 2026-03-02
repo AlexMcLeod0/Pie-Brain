@@ -195,7 +195,7 @@ fi
 # Tools — remove any tool not in TOOLS list
 for _f in tools/*.py; do
     _stem="$(basename "$_f" .py)"
-    [[ "$_stem" == "__init__" ]] && continue
+    [[ "$_stem" == "__init__" || "$_stem" == "base" ]] && continue
     _keep=0
     for _t in "${TOOLS[@]}"; do
       if [[ "$_t" == "$_stem" ]]; then

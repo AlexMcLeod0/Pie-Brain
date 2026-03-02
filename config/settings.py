@@ -6,10 +6,13 @@ import yaml
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Absolute project root so .env and config.yaml are found regardless of CWD.
+_PROJECT_ROOT = Path(__file__).parent.parent
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -71,6 +74,8 @@ class Settings(BaseSettings):
     def from_yaml(cls, path: str | Path = "config.yaml") -> "Settings":
         """Load settings, overlaying config.yaml values on top of defaults/env."""
         yaml_path = Path(path)
+        if not yaml_path.is_absolute():
+            yaml_path = _PROJECT_ROOT / yaml_path
         overrides: dict = {}
         if yaml_path.exists():
             with yaml_path.open() as f:
