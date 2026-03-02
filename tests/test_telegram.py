@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from core.db import TaskStatus
+
 # We import only the pieces we can test without a live bot token.
 # The Application / Bot objects are always mocked.
 
@@ -179,3 +181,97 @@ async def test_on_startup_creates_delivery_task(provider):
     await asyncio.sleep(0)
 
     assert delivered == [True]
+
+
+# ---------------------------------------------------------------------------
+# register_engine — wires up callback
+# ---------------------------------------------------------------------------
+
+def test_register_engine_subscribes_callback(provider):
+    """register_engine calls engine.register_notify_callback with _on_task_update."""
+    mock_engine = MagicMock()
+    provider.register_engine(mock_engine)
+    mock_engine.register_notify_callback.assert_called_once_with(provider._on_task_update)
+
+
+# ---------------------------------------------------------------------------
+# _on_task_update — push notifications per status
+# ---------------------------------------------------------------------------
+
+def _make_task(status, chat_id=1234, task_id=10, tool_name="arxiv", metadata=None):
+    task = MagicMock()
+    task.id = task_id
+    task.chat_id = chat_id
+    task.status = status
+    task.tool_name = tool_name
+    task.metadata = metadata or {}
+    return task
+
+
+async def test_on_task_update_routing_sends_message(provider, mock_settings):
+    """routing status pushes a brief 'routing…' message."""
+    task = _make_task(TaskStatus.routing)
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.Bot", return_value=mock_bot):
+        await provider._on_task_update(task)
+
+    mock_bot.send_message.assert_called_once()
+    text = mock_bot.send_message.call_args.kwargs["text"]
+    assert str(task.id) in text
+    assert "routing" in text.lower()
+
+
+async def test_on_task_update_executing_includes_tool(provider, mock_settings):
+    """executing status includes the tool name in the push message."""
+    task = _make_task(TaskStatus.executing, tool_name="memory")
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.Bot", return_value=mock_bot):
+        await provider._on_task_update(task)
+
+    text = mock_bot.send_message.call_args.kwargs["text"]
+    assert "memory" in text
+    assert str(task.id) in text
+
+
+async def test_on_task_update_done_delegates_to_send_result(provider, mock_settings):
+    """done status delegates to _send_result (which handles file lookup + mark_notified)."""
+    task = _make_task(TaskStatus.done)
+    provider.settings = mock_settings
+    provider._send_result = AsyncMock()
+    mock_bot = AsyncMock()
+
+    with patch("providers.telegram.Bot", return_value=mock_bot):
+        await provider._on_task_update(task)
+
+    provider._send_result.assert_awaited_once()
+    mock_bot.send_message.assert_not_called()
+
+
+async def test_on_task_update_failed_sends_error(provider, mock_settings):
+    """failed status pushes the error message from metadata."""
+    task = _make_task(TaskStatus.failed, metadata={"error": "tool not found"})
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.Bot", return_value=mock_bot):
+        await provider._on_task_update(task)
+
+    text = mock_bot.send_message.call_args.kwargs["text"]
+    assert "failed" in text.lower()
+    assert "tool not found" in text
+
+
+async def test_on_task_update_skips_no_chat_id(provider, mock_settings):
+    """Tasks without chat_id (scheduler tasks) produce no push notification."""
+    task = _make_task(TaskStatus.routing, chat_id=None)
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.Bot", return_value=mock_bot):
+        await provider._on_task_update(task)
+
+    mock_bot.send_message.assert_not_called()

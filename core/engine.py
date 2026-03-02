@@ -1,7 +1,9 @@
 """Main async engine loop."""
 import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
+from typing import Awaitable
 
 import guardian
 from config.settings import get_settings
@@ -9,6 +11,7 @@ from core.db import (
     TaskStatus,
     init_db,
     get_pending_tasks,
+    get_task_by_id,
     update_task_status,
     setup_logging,
 )
@@ -35,6 +38,24 @@ class Engine:
         )
         self.brain_registry = BrainRegistry(cloud_brain_semaphore=self.brain_sem)
         self._running = False
+        self._notify_callbacks: list[Callable[..., Awaitable[None]]] = []
+
+    def register_notify_callback(self, cb: Callable[..., Awaitable[None]]) -> None:
+        """Register a coroutine function called on every task status transition."""
+        self._notify_callbacks.append(cb)
+
+    async def _notify(self, task_id: int) -> None:
+        """Fetch the current task state and fan-out to all registered callbacks."""
+        if not self._notify_callbacks:
+            return
+        task = await get_task_by_id(self.settings.db_path, task_id)
+        if task is None:
+            return
+        for cb in self._notify_callbacks:
+            try:
+                await cb(task)
+            except Exception:
+                logger.exception("Notify callback error for task %d", task_id)
 
     async def run(self) -> None:
         """Start the engine; polls DB and dispatches tasks indefinitely."""
@@ -46,7 +67,9 @@ class Engine:
         if self.settings.telegram_bot_token:
             try:
                 from providers.telegram import TelegramProvider
-                asyncio.create_task(TelegramProvider().run())
+                tp = TelegramProvider()
+                tp.register_engine(self)
+                asyncio.create_task(tp.run())
                 logger.info("Telegram provider started.")
             except ImportError:
                 logger.warning("Telegram provider not available (not installed).")
@@ -84,6 +107,7 @@ class Engine:
         try:
             # Mark as routing
             await update_task_status(db, task.id, TaskStatus.routing)
+            await self._notify(task.id)
 
             # Route via Ollama
             router_output = await self.router.route(task.request_text)
@@ -100,6 +124,7 @@ class Engine:
                 tool_name=router_output.tool_name,
                 metadata={"params": router_output.params, "handoff": router_output.handoff},
             )
+            await self._notify(task.id)
 
             if router_output.handoff:
                 await self._spawn_brain(router_output.tool_name, router_output.params)
@@ -113,6 +138,7 @@ class Engine:
                 await tool.run_local(params)
 
             await update_task_status(db, task.id, TaskStatus.done)
+            await self._notify(task.id)
 
         except Exception as exc:
             logger.exception("Task %d failed: %s", task.id, exc)
@@ -120,6 +146,7 @@ class Engine:
                 db, task.id, TaskStatus.failed,
                 metadata={"error": str(exc)},
             )
+            await self._notify(task.id)
 
     async def _spawn_brain(self, tool_name: str, params: dict) -> None:
         """Spawn a cloud brain subprocess; uses nohup for harness-restart survival."""

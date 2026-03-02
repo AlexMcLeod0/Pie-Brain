@@ -9,6 +9,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 import guardian
 from config.settings import get_settings
 from core.db import (
+    TaskStatus,
     enqueue_task,
     get_completed_unnotified,
     get_recent_tasks,
@@ -20,11 +21,12 @@ logger = logging.getLogger(__name__)
 
 HELP_TEXT = (
     "*Pie-Brain* — task routing engine\n\n"
-    "Just send me a message and I'll route it to the right tool.\n\n"
+    "Just send me a message and I'll route it to the right tool\\. "
+    "You'll receive live updates as your task moves through routing → executing → done\\.\n\n"
     "Commands:\n"
     "/start — welcome message\n"
     "/help — show this message\n"
-    "/status \\[task\\_id\\] — check task status (omit id for last 5 tasks)\n"
+    "/status \\[task\\_id\\] — check task status \\(omit id for last 5 tasks\\)\n"
 )
 
 
@@ -42,6 +44,39 @@ class TelegramProvider:
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def register_engine(self, engine) -> None:  # noqa: ANN001
+        """Subscribe to engine task-status events."""
+        engine.register_notify_callback(self._on_task_update)
+
+    async def _on_task_update(self, task) -> None:
+        """Push a status update to the originating chat on every engine transition."""
+        if task.chat_id is None:
+            return  # scheduler task — no user to notify
+
+        bot = Bot(token=self.settings.telegram_bot_token)
+        status = task.status
+
+        if status == TaskStatus.routing:
+            text = f"Task #{task.id}: routing\u2026"
+        elif status == TaskStatus.executing:
+            tool = task.tool_name or "unknown"
+            text = f"Task #{task.id}: executing via {tool}\u2026"
+        elif status == TaskStatus.done:
+            # _send_result handles file lookup + mark_notified so the polling
+            # fallback won't double-deliver.
+            await self._send_result(bot, task)
+            return
+        elif status == TaskStatus.failed:
+            err = (task.metadata or {}).get("error", "unknown error")
+            text = f"Task #{task.id} failed: {err}"
+        else:
+            return
+
+        try:
+            await bot.send_message(chat_id=task.chat_id, text=text)
+        except Exception:
+            logger.exception("Failed to push status update for task #%d", task.id)
 
     async def _on_startup(self, application: Application) -> None:
         """Registered as post_init hook — runs inside run_polling()'s event loop."""
@@ -140,7 +175,7 @@ class TelegramProvider:
     # ------------------------------------------------------------------
 
     async def _deliver_results(self) -> None:
-        """Background loop: poll for done tasks and send results back to the user."""
+        """Fallback polling loop: catches any done tasks missed by push notifications."""
         bot = Bot(token=self.settings.telegram_bot_token)
         interval = self.settings.telegram_result_poll_interval
         while True:
