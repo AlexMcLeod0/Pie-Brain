@@ -226,23 +226,3 @@ def test_format_results_truncates_long_content():
     assert "x" * 601 not in out
 
 
-# ---------------------------------------------------------------------------
-# memory_runner entry point
-# ---------------------------------------------------------------------------
-
-def test_memory_runner_calls_run_local():
-    import json
-    import tools.memory_runner as runner
-
-    params = {"action": "store", "content": "hello", "source_path": "x.md"}
-    mock_run_local = AsyncMock()
-
-    def fake_asyncio_run(coro):
-        coro.close()
-
-    with patch("tools.memory_runner.asyncio.run", side_effect=fake_asyncio_run), \
-         patch.object(MemoryTool, "run_local", mock_run_local), \
-         patch("sys.argv", ["memory_runner", json.dumps(params)]):
-        runner.main()
-
-    mock_run_local.assert_called_once_with(params)

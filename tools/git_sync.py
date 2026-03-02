@@ -17,10 +17,6 @@ class GitSyncTool(BaseTool):
         else:
             await self._pre_task(params)
 
-    def get_spawn_cmd(self, params: dict) -> str:
-        import json
-        return f"python -m tools.git_sync_runner '{json.dumps(params)}'"
-
     # ------------------------------------------------------------------
 
     async def _pre_task(self, params: dict) -> None:

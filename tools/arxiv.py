@@ -26,11 +26,6 @@ class ArxivTool(BaseTool):
         else:
             await self._specific_search(params)
 
-    def get_spawn_cmd(self, params: dict) -> str:
-        import json
-        params_json = json.dumps(params)
-        return f"python -m tools.arxiv_runner '{params_json}'"
-
     # ------------------------------------------------------------------
 
     async def _specific_search(self, params: dict) -> None:

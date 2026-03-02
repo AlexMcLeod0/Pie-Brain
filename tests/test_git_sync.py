@@ -138,22 +138,3 @@ async def test_post_task_uses_custom_pr_title_and_body():
     assert ("gh", "pr", "create", "--title", "My PR", "--body", "Details here.") in cmds
 
 
-# ---------------------------------------------------------------------------
-# git_sync_runner entry point
-# ---------------------------------------------------------------------------
-
-def test_git_sync_runner_calls_run_local():
-    import tools.git_sync_runner as runner
-
-    params = {"phase": "pre", "repo_path": "/repo"}
-    mock_run_local = AsyncMock()
-
-    def fake_asyncio_run(coro):
-        coro.close()
-
-    with patch("tools.git_sync_runner.asyncio.run", side_effect=fake_asyncio_run), \
-         patch.object(GitSyncTool, "run_local", mock_run_local), \
-         patch("sys.argv", ["git_sync_runner", json.dumps(params)]):
-        runner.main()
-
-    mock_run_local.assert_called_once_with(params)

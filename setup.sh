@@ -195,7 +195,7 @@ fi
 # Tools — remove any tool not in TOOLS list
 for _f in tools/*.py; do
     _stem="$(basename "$_f" .py)"
-    [[ "$_stem" == "__init__" || "$_stem" == "base" ]] && continue
+    [[ "$_stem" == "__init__" || "$_stem" == "base" || "$_stem" == "runner" ]] && continue
     _keep=0
     for _t in "${TOOLS[@]}"; do
       if [[ "$_t" == "$_stem" ]]; then
@@ -205,8 +205,8 @@ for _f in tools/*.py; do
     done
 
     if [[ $_keep -eq 0 ]]; then
-      rm -f "tools/${_stem}.py" "tools/${_stem}_runner.py"
-      info "  removed tools/${_stem}.py and tools/${_stem}_runner.py"
+      rm -f "tools/${_stem}.py"
+      info "  removed tools/${_stem}.py"
     fi
 done
 
