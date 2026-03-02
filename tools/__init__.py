@@ -8,7 +8,7 @@ from tools.base import BaseTool
 # Import every module in this package so subclasses are registered
 _pkg_path = str(Path(__file__).parent)
 for _info in pkgutil.iter_modules([_pkg_path]):
-    if _info.name not in ("base",):
+    if _info.name not in ("base", "runner"):
         importlib.import_module(f"tools.{_info.name}")
 
 TOOL_REGISTRY: dict[str, type[BaseTool]] = {

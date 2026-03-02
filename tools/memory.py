@@ -60,10 +60,6 @@ class MemoryTool(BaseTool):
         else:
             await self._store(params)
 
-    def get_spawn_cmd(self, params: dict) -> str:
-        import json
-        return f"python -m tools.memory_runner '{json.dumps(params)}'"
-
     # ------------------------------------------------------------------
 
     async def _store(self, params: dict) -> None:

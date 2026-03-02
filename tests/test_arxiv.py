@@ -211,24 +211,3 @@ def test_format_papers_generated_at_present():
     assert "2026-02-26T12:00 UTC" in content
 
 
-# ---------------------------------------------------------------------------
-# arxiv_runner entry point
-# ---------------------------------------------------------------------------
-
-def test_arxiv_runner_calls_run_local():
-    """Runner parses sys.argv JSON and passes it to ArxivTool.run_local."""
-    import json
-    import tools.arxiv_runner as runner
-
-    params = {"query": "transformers", "mode": "search"}
-    mock_run_local = AsyncMock()
-
-    def fake_asyncio_run(coro):
-        coro.close()  # suppress "coroutine never awaited" warning
-
-    with patch("tools.arxiv_runner.asyncio.run", side_effect=fake_asyncio_run), \
-         patch.object(ArxivTool, "run_local", mock_run_local), \
-         patch("sys.argv", ["arxiv_runner", json.dumps(params)]):
-        runner.main()
-
-    mock_run_local.assert_called_once_with(params)
