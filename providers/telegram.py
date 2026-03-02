@@ -128,8 +128,12 @@ class TelegramProvider:
             await update.message.reply_text(f"Message rejected: {reason}")
             return
 
-        task_id = await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
-        await update.message.reply_text(f"Task #{task_id} queued.")
+        try:
+            task_id = await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
+            await update.message.reply_text(f"Task #{task_id} queued.")
+        except Exception as exc:
+            logger.exception("Failed to enqueue task from user_id=%d", update.effective_user.id)
+            await update.message.reply_text(f"Error: could not queue task ({exc})")
 
     # ------------------------------------------------------------------
     # Result delivery
@@ -177,7 +181,10 @@ class TelegramProvider:
     # Entry point
     # ------------------------------------------------------------------
 
-    def run(self) -> None:
-        """Start polling and result-delivery loop (blocking)."""
+    async def run(self) -> None:
+        """Start polling and result-delivery loop (runs inside the engine's event loop)."""
         logger.info("Telegram bot starting…")
-        self.app.run_polling()
+        async with self.app:
+            await self.app.updater.start_polling()
+            await self.app.start()
+            await asyncio.Event().wait()  # run until cancelled
