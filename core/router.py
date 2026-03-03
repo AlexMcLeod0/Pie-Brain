@@ -18,22 +18,29 @@ class RouterOutput(BaseModel):
 class Router:
     """Calls the local Ollama model to classify a task and produce a RouterOutput."""
 
-    SYSTEM_PROMPT = (
-        "You are a task router. Given a user request and their preferences, "
-        "respond with ONLY a valid JSON object with exactly these keys:\n"
-        '  "tool_name": string  (one of: arxiv, git_sync, memory, query)\n'
-        '  "params":    object  (tool-specific parameters)\n'
-        '  "handoff":   boolean (true if the task requires cloud brain)\n'
-        "Tool guidance:\n"
-        "  arxiv    — search for or fetch research papers\n"
-        "  git_sync — git operations: pull, commit, create PR\n"
-        "  memory   — store or retrieve a memory entry\n"
-        "  query    — answer a question about previous results OR casual conversation;\n"
-        '             params must contain {"question": "<the full user message>"}\n'
-        "Use query when the user asks what you found, asks a follow-up question, "
-        "or is just chatting. Use handoff=true only for tasks requiring deep reasoning.\n"
-        "Do NOT include any explanation or markdown fences."
-    )
+    def _build_system_prompt(self) -> str:
+        """Build the routing system prompt from whatever tools are in TOOL_REGISTRY.
+
+        Imported lazily so the router never needs updating when tools are added.
+        """
+        from tools import TOOL_REGISTRY  # noqa: PLC0415 — intentional lazy import
+
+        tool_names = ", ".join(TOOL_REGISTRY) if TOOL_REGISTRY else "none"
+        tool_lines = "".join(
+            f"  {name}: {cls.routing_description}\n" if cls.routing_description
+            else f"  {name}\n"
+            for name, cls in TOOL_REGISTRY.items()
+        )
+        return (
+            "You are a task router. Given a user request and their preferences, "
+            "respond with ONLY a valid JSON object with exactly these keys:\n"
+            f'  "tool_name": string  (one of: {tool_names})\n'
+            '  "params":    object  (tool-specific parameters)\n'
+            '  "handoff":   boolean (true if the task requires cloud brain)\n'
+            f"Tools:\n{tool_lines}"
+            "Use handoff=true only for tasks requiring deep reasoning.\n"
+            "Do NOT include any explanation or markdown fences."
+        )
 
     def __init__(
         self,
@@ -78,7 +85,7 @@ class Router:
                         self.client.chat(
                             model=self.model,
                             messages=[
-                                {"role": "system", "content": self.SYSTEM_PROMPT},
+                                {"role": "system", "content": self._build_system_prompt()},
                                 {"role": "user", "content": prompt},
                             ],
                         ),

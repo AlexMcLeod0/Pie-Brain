@@ -5,6 +5,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.router import Router, RouterOutput
+from tools.base import BaseTool
 
 
 def make_router(max_retries: int = 3, timeout: float = 300.0) -> Router:
@@ -98,3 +99,53 @@ async def test_route_raises_after_all_retries_exhausted():
     ):
         with pytest.raises(RuntimeError, match="failed after 2 attempt"):
             await router.route("Find papers on RL")
+
+
+# ---- _build_system_prompt — dynamic tool list --------------------------------
+
+def test_build_system_prompt_includes_tool_names():
+    """Tool names from TOOL_REGISTRY appear in the generated prompt."""
+    router = make_router()
+
+    class FakeTool(BaseTool):
+        tool_name = "fake_tool"
+        routing_description = "does something fake"
+        async def run_local(self, params: dict) -> None: ...
+
+    with patch.dict("tools.TOOL_REGISTRY", {"fake_tool": FakeTool}):
+        prompt = router._build_system_prompt()
+
+    assert "fake_tool" in prompt
+
+
+def test_build_system_prompt_includes_routing_descriptions():
+    """routing_description from each tool appears in the generated prompt."""
+    router = make_router()
+
+    class FakeTool(BaseTool):
+        tool_name = "fake_tool"
+        routing_description = "does something unique and identifiable"
+        async def run_local(self, params: dict) -> None: ...
+
+    with patch.dict("tools.TOOL_REGISTRY", {"fake_tool": FakeTool}):
+        prompt = router._build_system_prompt()
+
+    assert "does something unique and identifiable" in prompt
+
+
+def test_build_system_prompt_handles_empty_registry():
+    """An empty registry produces a valid (safe) prompt without crashing."""
+    router = make_router()
+    with patch.dict("tools.TOOL_REGISTRY", {}, clear=True):
+        prompt = router._build_system_prompt()
+    assert "tool_name" in prompt
+    assert "none" in prompt
+
+
+def test_build_system_prompt_reflects_real_tools():
+    """The real TOOL_REGISTRY tools all appear in the generated prompt."""
+    from tools import TOOL_REGISTRY
+    router = make_router()
+    prompt = router._build_system_prompt()
+    for name in TOOL_REGISTRY:
+        assert name in prompt
