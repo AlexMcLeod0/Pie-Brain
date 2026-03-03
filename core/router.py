@@ -21,9 +21,17 @@ class Router:
     SYSTEM_PROMPT = (
         "You are a task router. Given a user request and their preferences, "
         "respond with ONLY a valid JSON object with exactly these keys:\n"
-        '  "tool_name": string  (one of: arxiv, git_sync, memory)\n'
+        '  "tool_name": string  (one of: arxiv, git_sync, memory, query)\n'
         '  "params":    object  (tool-specific parameters)\n'
         '  "handoff":   boolean (true if the task requires cloud brain)\n'
+        "Tool guidance:\n"
+        "  arxiv    — search for or fetch research papers\n"
+        "  git_sync — git operations: pull, commit, create PR\n"
+        "  memory   — store or retrieve a memory entry\n"
+        "  query    — answer a question about previous results OR casual conversation;\n"
+        '             params must contain {"question": "<the full user message>"}\n'
+        "Use query when the user asks what you found, asks a follow-up question, "
+        "or is just chatting. Use handoff=true only for tasks requiring deep reasoning.\n"
         "Do NOT include any explanation or markdown fences."
     )
 
