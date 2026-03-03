@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 class BaseTool(ABC):
     tool_name: str = ""
+    routing_description: str = ""  # one-line hint used to build the router system prompt
 
     @abstractmethod
     async def run_local(self, params: dict) -> None:

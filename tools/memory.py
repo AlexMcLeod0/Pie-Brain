@@ -52,6 +52,7 @@ def _get_or_create_table(db, dim: int):
 
 class MemoryTool(BaseTool):
     tool_name = "memory"
+    routing_description = "store information to memory or search existing memories"
 
     async def run_local(self, params: dict) -> None:
         action = params.get("action", "store")

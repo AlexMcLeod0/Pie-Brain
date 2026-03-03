@@ -18,6 +18,7 @@ _SUMMARY_TRUNCATE = 400
 
 class ArxivTool(BaseTool):
     tool_name = "arxiv"
+    routing_description = "search or fetch research papers by query, ID, or daily discovery"
 
     async def run_local(self, params: dict) -> None:
         mode = params.get("mode", "search")

@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 class GitSyncTool(BaseTool):
     tool_name = "git_sync"
+    routing_description = "git operations: pull, commit, push, or create a pull request"
 
     async def run_local(self, params: dict) -> None:
         phase = params.get("phase", "pre")
