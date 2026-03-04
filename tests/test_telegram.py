@@ -59,6 +59,7 @@ async def test_send_result_uses_task_id_prefixed_file(tmp_path, mock_settings, p
     task.id = 42
     task.chat_id = 1001
     task.tool_name = "arxiv"
+    task.result = None  # no structured result; should fall through to file glob
 
     mock_bot = AsyncMock()
     provider.settings = mock_settings
@@ -81,6 +82,7 @@ async def test_send_result_falls_back_when_no_file(tmp_path, mock_settings, prov
     task.id = 7
     task.chat_id = 2002
     task.tool_name = "arxiv"
+    task.result = None
 
     mock_bot = AsyncMock()
     provider.settings = mock_settings
@@ -102,6 +104,7 @@ async def test_send_result_truncates_long_output(tmp_path, mock_settings, provid
     task.id = 5
     task.chat_id = 3003
     task.tool_name = "memory"
+    task.result = None
 
     mock_bot = AsyncMock()
     provider.settings = mock_settings
@@ -112,6 +115,43 @@ async def test_send_result_truncates_long_output(tmp_path, mock_settings, provid
     sent_text = mock_bot.send_message.call_args.kwargs["text"]
     assert "…(truncated)" in sent_text
     assert len(sent_text) <= 4100  # 4000 content + truncation notice
+
+
+async def test_send_result_uses_task_result_field(mock_settings, provider):
+    """When task.result is set, it's sent directly without touching the inbox."""
+    task = MagicMock()
+    task.id = 10
+    task.chat_id = 5005
+    task.tool_name = "query"
+    task.result = "The answer is 42."
+
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.mark_notified", new=AsyncMock()):
+        await provider._send_result(mock_bot, task)
+
+    sent_text = mock_bot.send_message.call_args.kwargs["text"]
+    assert sent_text == "The answer is 42."
+
+
+async def test_send_result_truncates_long_task_result(mock_settings, provider):
+    """task.result longer than 4000 chars is truncated."""
+    task = MagicMock()
+    task.id = 11
+    task.chat_id = 5006
+    task.tool_name = "query"
+    task.result = "y" * 5000
+
+    mock_bot = AsyncMock()
+    provider.settings = mock_settings
+
+    with patch("providers.telegram.mark_notified", new=AsyncMock()):
+        await provider._send_result(mock_bot, task)
+
+    sent_text = mock_bot.send_message.call_args.kwargs["text"]
+    assert "…(truncated)" in sent_text
+    assert len(sent_text) <= 4100
 
 
 # ---------------------------------------------------------------------------

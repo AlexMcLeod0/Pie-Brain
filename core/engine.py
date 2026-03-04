@@ -137,6 +137,7 @@ class Engine:
             )
             await self._notify(task.id)
 
+            result: str | None = None
             if router_output.handoff:
                 await self._spawn_brain(router_output.tool_name, router_output.params)
             else:
@@ -159,9 +160,9 @@ class Engine:
                 tool = tool_cls()
                 # Inject task ID so tools can name output files unambiguously
                 params = {**router_output.params, "_task_id": task.id}
-                await tool.run_local(params)
+                result = await tool.run_local(params)
 
-            await update_task_status(db, task.id, TaskStatus.done)
+            await update_task_status(db, task.id, TaskStatus.done, result=result)
             await self._notify(task.id)
 
         except Exception as exc:

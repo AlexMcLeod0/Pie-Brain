@@ -113,6 +113,21 @@ async def test_get_recent_tasks_empty_db(db):
     assert tasks == []
 
 
+async def test_update_task_with_result(db):
+    task_id = await enqueue_task(db, "answer me")
+    await update_task_status(db, task_id, TaskStatus.done, result="Here is the answer.")
+    task = await get_task_by_id(db, task_id)
+    assert task is not None
+    assert task.result == "Here is the answer."
+
+
+async def test_result_defaults_to_none(db):
+    task_id = await enqueue_task(db, "no result task")
+    task = await get_task_by_id(db, task_id)
+    assert task is not None
+    assert task.result is None
+
+
 async def test_failed_status_persists_error_metadata(db):
     task_id = await enqueue_task(db, "a task that will fail")
     await update_task_status(
