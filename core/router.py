@@ -22,6 +22,8 @@ class Router:
         """Build the routing system prompt from whatever tools are in TOOL_REGISTRY.
 
         Imported lazily so the router never needs updating when tools are added.
+        Includes few-shot examples from each tool's routing_examples attribute so
+        the model sees concrete input→output pairs rather than descriptions alone.
         """
         from tools import TOOL_REGISTRY  # noqa: PLC0415 — intentional lazy import
 
@@ -31,6 +33,17 @@ class Router:
             else f"  {name}\n"
             for name, cls in TOOL_REGISTRY.items()
         )
+
+        example_lines = ""
+        for name, cls in TOOL_REGISTRY.items():
+            for user_msg, params_json in cls.routing_examples:
+                full = (
+                    f'{{"tool_name": "{name}", "params": {params_json}, "handoff": false}}'
+                )
+                example_lines += f'User: "{user_msg}"\n{full}\n'
+
+        examples_section = f"\nExamples:\n{example_lines}" if example_lines else ""
+
         return (
             "You are a task router. Given a user request and their preferences, "
             "respond with ONLY a valid JSON object with exactly these keys:\n"
@@ -38,6 +51,7 @@ class Router:
             '  "params":    object  (tool-specific parameters)\n'
             '  "handoff":   boolean (true if the task requires cloud brain)\n'
             f"Tools:\n{tool_lines}"
+            f"{examples_section}\n"
             "Use handoff=true only for tasks requiring deep reasoning.\n"
             "Do NOT include any explanation or markdown fences."
         )

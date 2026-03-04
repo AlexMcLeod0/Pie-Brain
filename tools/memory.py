@@ -53,6 +53,16 @@ def _get_or_create_table(db, dim: int):
 class MemoryTool(BaseTool):
     tool_name = "memory"
     routing_description = "store information to memory or search existing memories"
+    routing_examples = [
+        (
+            "Remember that I prefer concise answers",
+            '{"action": "store", "content": "User prefers concise answers"}',
+        ),
+        (
+            "What do you remember about my preferences?",
+            '{"action": "query", "query": "preferences"}',
+        ),
+    ]
 
     async def run_local(self, params: dict) -> None:
         action = params.get("action", "store")

@@ -29,6 +29,16 @@ class QueryTool(BaseTool):
         "answer a question about previous results or casual conversation; "
         'params must include {"question": "<the user\'s full message>"}'
     )
+    routing_examples = [
+        (
+            "What did you find about transformer architecture?",
+            '{"question": "What did you find about transformer architecture?"}',
+        ),
+        (
+            "How's it hanging?",
+            '{"question": "How\'s it hanging?"}',
+        ),
+    ]
 
     async def run_local(self, params: dict) -> None:
         question = params.get("question", "").strip()
