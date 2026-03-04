@@ -92,6 +92,14 @@ class Engine:
             )
         )
 
+        # Start dev-mode git watcher (disabled by default)
+        if self.settings.dev_mode:
+            from core.dev_watcher import watch_for_updates
+            asyncio.create_task(
+                watch_for_updates(poll_interval=self.settings.dev_mode_poll_interval)
+            )
+            logger.info("Dev mode active: auto-pull enabled.")
+
         while self._running:
             tasks = await get_pending_tasks(self.settings.db_path)
             for task in tasks:

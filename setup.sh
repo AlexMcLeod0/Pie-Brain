@@ -445,6 +445,18 @@ echo
 read -rp "  Ollama router model [qwen2.5:1.5b]: " _ollama_model
 OLLAMA_MODEL="${_ollama_model:-qwen2.5:1.5b}"
 
+echo
+echo -e "${BOLD}Dev mode (auto-pull updates):${RESET}"
+echo "  When enabled, the engine watches the git remote and pulls new commits"
+echo "  automatically, then restarts itself. Useful while actively developing;"
+echo "  leave off for stable production installs."
+read -rp "  Enable dev mode? [y/N]: " _dev_mode
+DEV_MODE="false"
+case "${_dev_mode:-N}" in
+    y|Y) DEV_MODE="true" ; warn "Dev mode ON — engine will auto-pull and restart on new commits." ;;
+    *)   success "Dev mode off (default)." ;;
+esac
+
 TELEGRAM_TOKEN=""
 TELEGRAM_ALLOWED=""
 if [[ "$PROVIDER" == "telegram" ]]; then
@@ -513,6 +525,8 @@ fi
     _decl_csv=""
     [[ ${#_declined_fresh[@]} -gt 0 ]] && _decl_csv="$(join_comma "${_declined_fresh[@]}")"
     echo "SETUP_DECLINED_TOOLS=${_decl_csv}"
+    # Dev mode
+    echo "DEV_MODE=${DEV_MODE}"
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 success ".env written to ${ENV_FILE}"

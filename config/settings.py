@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     guardian_poll_interval: int = 60
     guardian_allowed_write_paths: list[str] = ["~/brain", "~/.pie-brain"]
 
+    # Dev mode — auto-pull git updates and restart the engine on new commits
+    dev_mode: bool = False
+    dev_mode_poll_interval: int = 60  # seconds between git fetch checks
+
     @field_validator(
         "db_path", "log_dir", "brain_inbox", "user_prefs_path", "memory_db_path", mode="before"
     )
