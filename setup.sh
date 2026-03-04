@@ -442,8 +442,20 @@ echo
 echo -e "${BOLD}── Runtime configuration ──${RESET}"
 echo
 
-read -rp "  Ollama router model [qwen2.5:1.5b]: " _ollama_model
-OLLAMA_MODEL="${_ollama_model:-qwen2.5:1.5b}"
+read -rp "  Ollama router model [qwen3.5:2b]: " _ollama_model
+OLLAMA_MODEL="${_ollama_model:-qwen3.5:2b}"
+
+echo
+echo -e "${BOLD}Dev mode (auto-pull updates):${RESET}"
+echo "  When enabled, the engine watches the git remote and pulls new commits"
+echo "  automatically, then restarts itself. Useful while actively developing;"
+echo "  leave off for stable production installs."
+read -rp "  Enable dev mode? [y/N]: " _dev_mode
+DEV_MODE="false"
+case "${_dev_mode:-N}" in
+    y|Y) DEV_MODE="true" ; warn "Dev mode ON — engine will auto-pull and restart on new commits." ;;
+    *)   success "Dev mode off (default)." ;;
+esac
 
 TELEGRAM_TOKEN=""
 TELEGRAM_ALLOWED=""
@@ -513,6 +525,8 @@ fi
     _decl_csv=""
     [[ ${#_declined_fresh[@]} -gt 0 ]] && _decl_csv="$(join_comma "${_declined_fresh[@]}")"
     echo "SETUP_DECLINED_TOOLS=${_decl_csv}"
+    # Dev mode
+    echo "DEV_MODE=${DEV_MODE}"
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 success ".env written to ${ENV_FILE}"
@@ -562,8 +576,7 @@ printf "  %-18s %s\n" "Messaging:"      "${PROVIDER}"
 printf "  %-18s %s\n" "Tools:"          "query (always) + ${TOOLS[*]:-none}"
 echo
 echo -e "${BOLD}Next steps:${RESET}"
-echo "  1. Pull your Ollama model:     ollama pull ${OLLAMA_MODEL}"
-[[ "$BRAIN" == "claude_code" ]] && \
+echo "  1. Pull your Ollama model:     ollama pull ${OLLAMA_MODEL}"[[ "$BRAIN" == "claude_code" ]] && \
 echo "  2. Authenticate Claude Code:   claude login"
 echo "  3. Start the engine:"
 case "${_svc:-}" in

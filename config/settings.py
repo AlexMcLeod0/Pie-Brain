@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     default_cloud_brain: str = "claude_code"
 
     # Ollama
-    ollama_model: str = "qwen2.5:1.5b"
+    ollama_model: str = "qwen3.5:2b"
     ollama_base_url: str = "http://localhost:11434"
     ollama_timeout: int = 300  # seconds; generous for CPU-bound Pi 4
     ollama_max_retries: int = 3
@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # Guardian
     guardian_poll_interval: int = 60
     guardian_allowed_write_paths: list[str] = ["~/brain", "~/.pie-brain"]
+
+    # Dev mode — auto-pull git updates and restart the engine on new commits
+    dev_mode: bool = False
+    dev_mode_poll_interval: int = 300  # seconds between git fetch checks (default 5 min)
 
     @field_validator(
         "db_path", "log_dir", "brain_inbox", "user_prefs_path", "memory_db_path", mode="before"
