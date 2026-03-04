@@ -29,6 +29,38 @@ success() { echo -e "${GREEN}[✓]${RESET} $*"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $*"; }
 die()     { echo -e "${RED}[✗]${RESET} $*" >&2; exit 1; }
 
+# Upsert KEY=VALUE in an .env file (portable: no sed -i differences)
+update_env_var() {
+    local key="$1" value="$2" file="$3"
+    local tmp
+    tmp="$(mktemp)"
+    grep -v "^${key}=" "$file" 2>/dev/null > "$tmp" || true
+    echo "${key}=${value}" >> "$tmp"
+    mv "$tmp" "$file"
+}
+
+# Human-readable description for a tool stem name
+tool_description() {
+    case "$1" in
+        arxiv)    echo "ArXiv paper search and daily discovery" ;;
+        memory)   echo "Persistent vector memory with deduplication (LanceDB)" ;;
+        git_sync) echo "Git repo sync and PR creation" ;;
+        *)        echo "no description available" ;;
+    esac
+}
+
+# uv extras flag needed for a tool's dependencies (empty = base deps only)
+tool_extras() {
+    case "$1" in
+        arxiv)  echo "arxiv" ;;
+        memory) echo "memory" ;;
+        *)      echo "" ;;
+    esac
+}
+
+# Join array elements with commas
+join_comma() { local IFS=','; echo "$*"; }
+
 # ─── Banner ───────────────────────────────────────────────────────────────────
 echo -e "${CYAN}${BOLD}"
 cat << 'BANNER'
@@ -111,21 +143,142 @@ fi
 if [[ "$MODE" == "update" ]]; then
     echo
     info "Updating Pie-Brain in ${INSTALL_DIR}…"
+    ENV_FILE="${INSTALL_DIR}/.env"
 
+    # ── Snapshot state before the pull ──────────────────────────────────────
+    # Which optional tool files are on disk right now?
+    _installed_before=()
+    for _f in "${INSTALL_DIR}/tools/"*.py; do
+        [[ -f "$_f" ]] || continue
+        _stem="$(basename "$_f" .py)"
+        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        _installed_before+=("$_stem")
+    done
+
+    # Which tools did the user previously decline? (stored in .env)
+    _declined_str="$(grep '^SETUP_DECLINED_TOOLS=' "$ENV_FILE" 2>/dev/null \
+        | cut -d= -f2- | tr -d ' ' || true)"
+    _declined_before=()
+    [[ -n "$_declined_str" ]] && IFS=',' read -ra _declined_before <<< "$_declined_str"
+
+    # ── Pull latest code ─────────────────────────────────────────────────────
     tmp_dir="$(mktemp -d)"
     git clone --depth 1 "$REPO_URL" "$tmp_dir"
-    # Preserve .env, .env backups, and the existing virtualenv
     rsync -a --delete \
         --exclude='.env' \
         --exclude='.env.bak.*' \
         --exclude='.venv' \
-        "$tmp_dir/" "$INSTALL_DIR/"
+        "$tmp_dir/" "${INSTALL_DIR}/"
     rm -rf "$tmp_dir"
     success "Code updated."
 
     cd "$INSTALL_DIR"
+
+    # ── Discover optional tools available after the pull ─────────────────────
+    # (query is always kept and excluded from user-facing choices)
+    _available_now=()
+    for _f in tools/*.py; do
+        [[ -f "$_f" ]] || continue
+        _stem="$(basename "$_f" .py)"
+        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        _available_now+=("$_stem")
+    done
+
+    # ── Identify genuinely new tools ─────────────────────────────────────────
+    # A tool is "new" if it's in the pulled code but was neither installed
+    # before nor explicitly declined — so we never re-ask about declined tools.
+    _new_tools=()
+    for _t in ${_available_now[@]+"${_available_now[@]}"}; do
+        _known=0
+        for _i in ${_installed_before[@]+"${_installed_before[@]}"}; do
+            [[ "$_i" == "$_t" ]] && _known=1 && break
+        done
+        for _d in ${_declined_before[@]+"${_declined_before[@]}"}; do
+            [[ "$_d" == "$_t" ]] && _known=1 && break
+        done
+        [[ $_known -eq 0 ]] && _new_tools+=("$_t")
+    done
+
+    # ── Ask about new tools ───────────────────────────────────────────────────
+    _tools_to_keep=(${_installed_before[@]+"${_installed_before[@]}"})
+    _declined_final=(${_declined_before[@]+"${_declined_before[@]}"})
+
+    if [[ ${#_new_tools[@]} -gt 0 ]]; then
+        echo
+        echo -e "${BOLD}New tools available:${RESET}"
+        for _t in "${_new_tools[@]}"; do
+            _desc="$(tool_description "$_t")"
+            read -rp "  Install ${_t} — ${_desc}? [Y/n]: " _yn
+            case "${_yn:-Y}" in
+                y|Y) _tools_to_keep+=("$_t") ;;
+                *)   _declined_final+=("$_t") ;;
+            esac
+        done
+    fi
+
+    # ── Optional: reconfigure all tools (re-offer previously declined) ────────
+    if [[ ${#_declined_before[@]} -gt 0 ]]; then
+        echo
+        read -rp "  Reconfigure all tools (review previously declined)? [y/N]: " _reconfig
+        if [[ "${_reconfig:-N}" =~ ^[Yy]$ ]]; then
+            _tools_to_keep=()
+            _declined_final=()
+            echo
+            echo -e "${BOLD}All available tools (including previously declined):${RESET}"
+            for _t in ${_available_now[@]+"${_available_now[@]}"}; do
+                _desc="$(tool_description "$_t")"
+                read -rp "  Install ${_t} — ${_desc}? [Y/n]: " _yn
+                case "${_yn:-Y}" in
+                    y|Y) _tools_to_keep+=("$_t") ;;
+                    *)   _declined_final+=("$_t") ;;
+                esac
+            done
+        fi
+    fi
+
+    # ── Prune tools not in the keep list (query is never pruned) ─────────────
+    for _f in tools/*.py; do
+        [[ -f "$_f" ]] || continue
+        _stem="$(basename "$_f" .py)"
+        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        _keep=0
+        for _t in ${_tools_to_keep[@]+"${_tools_to_keep[@]}"}; do
+            [[ "$_t" == "$_stem" ]] && _keep=1 && break
+        done
+        if [[ $_keep -eq 0 ]]; then
+            rm -f "tools/${_stem}.py"
+            info "  removed tools/${_stem}.py"
+        fi
+    done
+
+    # ── Persist updated tool state in .env ───────────────────────────────────
+    if [[ -f "$ENV_FILE" ]]; then
+        _inst_csv=""
+        [[ ${#_tools_to_keep[@]} -gt 0 ]] && _inst_csv="$(join_comma "${_tools_to_keep[@]}")"
+        _decl_csv=""
+        [[ ${#_declined_final[@]} -gt 0 ]] && _decl_csv="$(join_comma "${_declined_final[@]}")"
+        update_env_var "SETUP_INSTALLED_TOOLS" "$_inst_csv" "$ENV_FILE"
+        update_env_var "SETUP_DECLINED_TOOLS"  "$_decl_csv" "$ENV_FILE"
+    fi
+
+    # ── Install dependencies for the current tool set ─────────────────────────
     info "Updating Python dependencies…"
-    "$UV_BIN" sync --extra full || die "Dependency update failed."
+    _upd_extras=()
+    for _t in ${_tools_to_keep[@]+"${_tools_to_keep[@]}"}; do
+        _ex="$(tool_extras "$_t")"
+        [[ -n "$_ex" ]] && _upd_extras+=("$_ex")
+    done
+    if grep -q '^TELEGRAM_BOT_TOKEN=' "$ENV_FILE" 2>/dev/null; then
+        _upd_extras+=(telegram)
+    fi
+
+    if [[ ${#_upd_extras[@]} -gt 0 ]]; then
+        _extra_args=()
+        for _e in "${_upd_extras[@]}"; do _extra_args+=(--extra "$_e"); done
+        "$UV_BIN" sync "${_extra_args[@]}" || die "Dependency update failed."
+    else
+        "$UV_BIN" sync || die "Dependency update failed."
+    fi
     success "Dependencies updated."
 
     echo
@@ -134,6 +287,10 @@ if [[ "$MODE" == "update" ]]; then
     echo -e "${GREEN}${BOLD}══════════════════════════════════════════════${RESET}"
     echo
     echo "  Your settings in ${INSTALL_DIR}/.env were preserved."
+    if [[ ${#_new_tools[@]} -gt 0 ]]; then
+        _new_csv="$(join_comma "${_new_tools[@]}")"
+        echo "  New tools configured: ${_new_csv}"
+    fi
     echo "  Restart the engine to apply changes."
     echo
     exit 0
@@ -175,6 +332,7 @@ success "Messaging provider: ${PROVIDER}"
 echo
 echo -e "${BOLD}Which tools should be installed?${RESET}"
 echo "  Enter space-separated numbers, 'all', or 'none'."
+echo "  Note: the 'query' tool is always installed (required for routing fallback)."
 echo
 echo "  1) arxiv     — ArXiv paper search and daily discovery"
 echo "  2) memory    — Persistent vector memory with deduplication (LanceDB)"
@@ -182,6 +340,9 @@ echo "  3) git_sync  — Git repo sync and PR creation  (requires git + gh CLI)"
 echo
 read -rp "  Choices [all]: " _tools_input
 _tools_input="${_tools_input:-all}"
+
+# All optional tools (query is always included, not listed here)
+_all_optional_tools=(arxiv memory git_sync)
 
 TOOLS=()
 if [[ "$_tools_input" == "none" ]]; then
@@ -198,7 +359,17 @@ else
         esac
     done
 fi
-success "Tools: ${TOOLS[*]:-none}"
+success "Tools: query (always) + ${TOOLS[*]:-none}"
+
+# Compute which optional tools were declined — persisted so updates don't re-ask
+_declined_fresh=()
+for _t in "${_all_optional_tools[@]}"; do
+    _sel=0
+    for _s in ${TOOLS[@]+"${TOOLS[@]}"}; do
+        [[ "$_s" == "$_t" ]] && _sel=1 && break
+    done
+    [[ $_sel -eq 0 ]] && _declined_fresh+=("$_t")
+done
 
 if [[ " ${TOOLS[*]} " == *" git_sync "* ]] && ! command -v gh &>/dev/null; then
     warn "'gh' CLI not found — required by git_sync. Install: https://cli.github.com"
@@ -231,21 +402,18 @@ if [[ "$PROVIDER" == "none" ]]; then
     rm -f providers/telegram.py && info "  removed providers/telegram.py"
 fi
 
-# Tools — remove any tool not in TOOLS list
+# Tools — remove any optional tool not selected by the user.
+# 'query' is always kept; it is the routing fallback and cannot be disabled.
 for _f in tools/*.py; do
     _stem="$(basename "$_f" .py)"
-    [[ "$_stem" == "__init__" || "$_stem" == "base" || "$_stem" == "runner" ]] && continue
+    case "$_stem" in __init__|base|runner|query) continue ;; esac
     _keep=0
-    for _t in "${TOOLS[@]}"; do
-      if [[ "$_t" == "$_stem" ]]; then
-        _keep=1
-        break
-      fi
+    for _t in ${TOOLS[@]+"${TOOLS[@]}"}; do
+        [[ "$_t" == "$_stem" ]] && _keep=1 && break
     done
-
     if [[ $_keep -eq 0 ]]; then
-      rm -f "tools/${_stem}.py"
-      info "  removed tools/${_stem}.py"
+        rm -f "tools/${_stem}.py"
+        info "  removed tools/${_stem}.py"
     fi
 done
 
@@ -338,6 +506,13 @@ fi
             "$ARXIV_KEYWORDS")
         echo "ARXIV_DISCOVER_KEYWORDS=${_kw_json}"
     fi
+    # Tool state — used by the update branch to track new vs declined tools
+    _inst_csv=""
+    [[ ${#TOOLS[@]} -gt 0 ]] && _inst_csv="$(join_comma "${TOOLS[@]}")"
+    echo "SETUP_INSTALLED_TOOLS=${_inst_csv}"
+    _decl_csv=""
+    [[ ${#_declined_fresh[@]} -gt 0 ]] && _decl_csv="$(join_comma "${_declined_fresh[@]}")"
+    echo "SETUP_DECLINED_TOOLS=${_decl_csv}"
 } > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 success ".env written to ${ENV_FILE}"
@@ -384,7 +559,7 @@ echo
 printf "  %-18s %s\n" "Installed to:"   "${INSTALL_DIR}"
 printf "  %-18s %s\n" "Brain provider:" "${BRAIN}"
 printf "  %-18s %s\n" "Messaging:"      "${PROVIDER}"
-printf "  %-18s %s\n" "Tools:"          "${TOOLS[*]:-none}"
+printf "  %-18s %s\n" "Tools:"          "query (always) + ${TOOLS[*]:-none}"
 echo
 echo -e "${BOLD}Next steps:${RESET}"
 echo "  1. Pull your Ollama model:     ollama pull ${OLLAMA_MODEL}"
