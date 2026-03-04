@@ -15,7 +15,7 @@ from core.db import (
     update_task_status,
     setup_logging,
 )
-from core.router import Router
+from core.router import Router, RouterOutput
 from tools import TOOL_REGISTRY
 from brains.registry import BrainRegistry
 
@@ -109,8 +109,19 @@ class Engine:
             await update_task_status(db, task.id, TaskStatus.routing)
             await self._notify(task.id)
 
-            # Route via Ollama
-            router_output = await self.router.route(task.request_text)
+            # Route via Ollama — fall back to query on parse/timeout failures
+            try:
+                router_output = await self.router.route(task.request_text)
+            except Exception as exc:
+                logger.warning(
+                    "Task %d routing failed (%s); falling back to query", task.id, exc
+                )
+                router_output = RouterOutput(
+                    tool_name="query",
+                    params={"question": task.request_text},
+                    handoff=False,
+                )
+
             logger.info(
                 "Task %d → tool=%s handoff=%s",
                 task.id,
@@ -131,7 +142,20 @@ class Engine:
             else:
                 tool_cls = TOOL_REGISTRY.get(router_output.tool_name)
                 if tool_cls is None:
-                    raise ValueError(f"Unknown tool: {router_output.tool_name!r}")
+                    logger.warning(
+                        "Task %d: unknown tool %r, falling back to query",
+                        task.id, router_output.tool_name,
+                    )
+                    tool_cls = TOOL_REGISTRY.get("query")
+                    if tool_cls is None:
+                        raise ValueError(
+                            f"Unknown tool {router_output.tool_name!r} and no 'query' fallback"
+                        )
+                    router_output = RouterOutput(
+                        tool_name="query",
+                        params={"question": task.request_text},
+                        handoff=False,
+                    )
                 tool = tool_cls()
                 # Inject task ID so tools can name output files unambiguously
                 params = {**router_output.params, "_task_id": task.id}

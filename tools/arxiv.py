@@ -19,6 +19,16 @@ _SUMMARY_TRUNCATE = 400
 class ArxivTool(BaseTool):
     tool_name = "arxiv"
     routing_description = "search or fetch research papers by query, ID, or daily discovery"
+    routing_examples = [
+        (
+            "Can you find me papers on transformer architecture?",
+            '{"query": "transformer architecture", "mode": "search"}',
+        ),
+        (
+            "Pull the latest papers on reinforcement learning from arxiv",
+            '{"query": "reinforcement learning", "mode": "discover"}',
+        ),
+    ]
 
     async def run_local(self, params: dict) -> None:
         mode = params.get("mode", "search")

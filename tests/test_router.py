@@ -149,3 +149,36 @@ def test_build_system_prompt_reflects_real_tools():
     prompt = router._build_system_prompt()
     for name in TOOL_REGISTRY:
         assert name in prompt
+
+
+def test_build_system_prompt_includes_examples():
+    """routing_examples from a tool appear verbatim in the generated prompt."""
+    router = make_router()
+
+    class FakeTool(BaseTool):
+        tool_name = "fake_tool"
+        routing_description = "does something fake"
+        routing_examples = [("Do the fake thing please", '{"action": "fake"}')]
+        async def run_local(self, params: dict) -> None: ...
+
+    with patch.dict("tools.TOOL_REGISTRY", {"fake_tool": FakeTool}):
+        prompt = router._build_system_prompt()
+
+    assert "Do the fake thing please" in prompt
+    assert '"action": "fake"' in prompt
+
+
+def test_build_system_prompt_no_examples_section_when_empty():
+    """If no tool defines routing_examples the prompt has no Examples: header."""
+    router = make_router()
+
+    class NoExampleTool(BaseTool):
+        tool_name = "no_ex"
+        routing_description = "bare tool"
+        routing_examples = []
+        async def run_local(self, params: dict) -> None: ...
+
+    with patch.dict("tools.TOOL_REGISTRY", {"no_ex": NoExampleTool}, clear=True):
+        prompt = router._build_system_prompt()
+
+    assert "Examples:" not in prompt
