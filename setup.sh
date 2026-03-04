@@ -442,8 +442,8 @@ echo
 echo -e "${BOLD}── Runtime configuration ──${RESET}"
 echo
 
-read -rp "  Ollama router model [qwen2.5:1.5b]: " _ollama_model
-OLLAMA_MODEL="${_ollama_model:-qwen2.5:1.5b}"
+read -rp "  Ollama router model [qwen3.5:2b]: " _ollama_model
+OLLAMA_MODEL="${_ollama_model:-qwen3.5:2b}"
 
 echo
 echo -e "${BOLD}Dev mode (auto-pull updates):${RESET}"
@@ -576,8 +576,7 @@ printf "  %-18s %s\n" "Messaging:"      "${PROVIDER}"
 printf "  %-18s %s\n" "Tools:"          "query (always) + ${TOOLS[*]:-none}"
 echo
 echo -e "${BOLD}Next steps:${RESET}"
-echo "  1. Pull your Ollama model:     ollama pull ${OLLAMA_MODEL}"
-[[ "$BRAIN" == "claude_code" ]] && \
+echo "  1. Pull your Ollama model:     ollama pull ${OLLAMA_MODEL}"[[ "$BRAIN" == "claude_code" ]] && \
 echo "  2. Authenticate Claude Code:   claude login"
 echo "  3. Start the engine:"
 case "${_svc:-}" in
