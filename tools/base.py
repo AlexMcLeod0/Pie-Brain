@@ -10,8 +10,8 @@ class BaseTool(ABC):
     routing_examples: list[tuple[str, str]] = []
 
     @abstractmethod
-    async def run_local(self, params: dict) -> None:
-        """Execute the tool locally on the Pi."""
+    async def run_local(self, params: dict) -> str | None:
+        """Execute the tool locally on the Pi. Return a result string to deliver to the user, or None."""
 
     def get_spawn_cmd(self, params: dict) -> str:
         """Return a shell command to run this tool as a subprocess."""

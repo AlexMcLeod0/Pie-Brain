@@ -40,7 +40,7 @@ class QueryTool(BaseTool):
         ),
     ]
 
-    async def run_local(self, params: dict) -> None:
+    async def run_local(self, params: dict) -> str:
         question = params.get("question", "").strip()
         task_id = params.get("_task_id", 0)
         if not question:
@@ -53,6 +53,7 @@ class QueryTool(BaseTool):
         out_path = Path(settings.brain_inbox) / f"{task_id}_query.md"
         atomic_write(out_path, f"# {question}\n\n{answer}\n")
         logger.info("Query #%d answered, output → %s", task_id, out_path)
+        return answer
 
     # ------------------------------------------------------------------
     # Context gathering

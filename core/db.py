@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     tool_name   TEXT,
     metadata    TEXT    DEFAULT '{}',
     chat_id     INTEGER,
-    notified    INTEGER NOT NULL DEFAULT 0
+    notified    INTEGER NOT NULL DEFAULT 0,
+    result      TEXT
 );
 """
 
@@ -40,6 +41,7 @@ class Task(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     chat_id: int | None = None
     notified: bool = False
+    result: str | None = None
 
     @classmethod
     def from_row(cls, row: aiosqlite.Row) -> "Task":
@@ -51,6 +53,7 @@ class Task(BaseModel):
             metadata=json.loads(row["metadata"] or "{}"),
             chat_id=row["chat_id"],
             notified=bool(row["notified"]),
+            result=row["result"],
         )
 
 
@@ -59,7 +62,12 @@ async def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(DB_SCHEMA)
-        await db.commit()
+        # Migrate existing databases that predate the result column.
+        try:
+            await db.execute("ALTER TABLE tasks ADD COLUMN result TEXT")
+            await db.commit()
+        except aiosqlite.OperationalError:
+            pass  # column already exists
     logger.info("Database initialised at %s", db_path)
 
 
@@ -97,29 +105,26 @@ async def update_task_status(
     status: TaskStatus,
     tool_name: str | None = None,
     metadata: dict | None = None,
+    result: str | None = None,
 ) -> None:
-    """Atomically update a task's status (and optionally tool_name/metadata)."""
+    """Atomically update a task's status (and optionally tool_name/metadata/result)."""
+    fields = ["status = ?"]
+    values: list = [status.value]
+    if tool_name is not None:
+        fields.append("tool_name = ?")
+        values.append(tool_name)
+    if metadata is not None:
+        fields.append("metadata = ?")
+        values.append(json.dumps(metadata))
+    if result is not None:
+        fields.append("result = ?")
+        values.append(result)
+    values.append(task_id)
     async with aiosqlite.connect(db_path) as db:
-        if tool_name is not None and metadata is not None:
-            await db.execute(
-                "UPDATE tasks SET status=?, tool_name=?, metadata=? WHERE id=?",
-                (status.value, tool_name, json.dumps(metadata), task_id),
-            )
-        elif tool_name is not None:
-            await db.execute(
-                "UPDATE tasks SET status=?, tool_name=? WHERE id=?",
-                (status.value, tool_name, task_id),
-            )
-        elif metadata is not None:
-            await db.execute(
-                "UPDATE tasks SET status=?, metadata=? WHERE id=?",
-                (status.value, json.dumps(metadata), task_id),
-            )
-        else:
-            await db.execute(
-                "UPDATE tasks SET status=? WHERE id=?",
-                (status.value, task_id),
-            )
+        await db.execute(
+            f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?",
+            values,
+        )
         await db.commit()
 
 

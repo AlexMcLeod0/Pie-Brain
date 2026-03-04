@@ -107,6 +107,19 @@ async def test_run_local_writes_output_file(tmp_path, tool, mock_settings):
     assert "Great answer here." in text
 
 
+async def test_run_local_returns_answer(tmp_path, tool, mock_settings):
+    """run_local returns the answer string so the engine can store it on the task."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    mock_settings.brain_inbox = str(inbox)
+
+    with patch("tools.query.get_settings", return_value=mock_settings), \
+         patch.object(tool, "_ask_ollama", new=AsyncMock(return_value="42 is the answer.")):
+        result = await tool.run_local({"question": "What is the answer?", "_task_id": 1})
+
+    assert result == "42 is the answer."
+
+
 async def test_run_local_raises_on_empty_question(tool, mock_settings):
     with patch("tools.query.get_settings", return_value=mock_settings):
         with pytest.raises(ValueError, match="question"):

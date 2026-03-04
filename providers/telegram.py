@@ -189,21 +189,27 @@ class TelegramProvider:
 
     async def _send_result(self, bot: Bot, task) -> None:
         """Send the completed task result to the originating chat."""
-        inbox = Path(self.settings.brain_inbox)
         result_text = f"Task #{task.id} complete (tool: {task.tool_name or 'unknown'})."
 
-        # Look for output files written by this specific task (prefixed with task id)
-        if inbox.exists():
-            candidates = sorted(
-                inbox.glob(f"{task.id}_*.md"),
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
-            if candidates:
-                content = candidates[0].read_text(encoding="utf-8")
-                if len(content) > 4000:
-                    content = content[:4000] + "\n\n…(truncated)"
-                result_text = content
+        if task.result:
+            # Prefer the structured result stored on the task record.
+            result_text = task.result
+            if len(result_text) > 4000:
+                result_text = result_text[:4000] + "\n\n…(truncated)"
+        else:
+            # Fall back to inbox file (used by brain outputs, arxiv, etc.)
+            inbox = Path(self.settings.brain_inbox)
+            if inbox.exists():
+                candidates = sorted(
+                    inbox.glob(f"{task.id}_*.md"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                if candidates:
+                    content = candidates[0].read_text(encoding="utf-8")
+                    if len(content) > 4000:
+                        content = content[:4000] + "\n\n…(truncated)"
+                    result_text = content
 
         try:
             await bot.send_message(chat_id=task.chat_id, text=result_text)
