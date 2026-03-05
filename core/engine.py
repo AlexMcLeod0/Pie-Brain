@@ -44,6 +44,33 @@ class Engine:
         """Register a coroutine function called on every task status transition."""
         self._notify_callbacks.append(cb)
 
+    def _build_dev_update_notify(self):
+        """Return an async callable that broadcasts an update notice to all providers."""
+        settings = self.settings
+
+        async def _notify_update() -> None:
+            if settings.telegram_bot_token:
+                recipients = settings.telegram_allowed_user_ids
+                if not recipients:
+                    logger.warning(
+                        "Dev mode: no telegram_allowed_user_ids configured — skipping notification"
+                    )
+                    return
+                try:
+                    from telegram import Bot
+                    bot = Bot(token=settings.telegram_bot_token)
+                    for uid in recipients:
+                        try:
+                            await bot.send_message(chat_id=uid, text="Update complete")
+                        except Exception:
+                            logger.exception(
+                                "Dev mode: failed to notify Telegram user %d", uid
+                            )
+                except ImportError:
+                    logger.warning("Dev mode: Telegram not installed, skipping notification")
+
+        return _notify_update
+
     async def _notify(self, task_id: int) -> None:
         """Fetch the current task state and fan-out to all registered callbacks."""
         if not self._notify_callbacks:
@@ -96,7 +123,10 @@ class Engine:
         if self.settings.dev_mode:
             from core.dev_watcher import watch_for_updates
             asyncio.create_task(
-                watch_for_updates(poll_interval=self.settings.dev_mode_poll_interval)
+                watch_for_updates(
+                    poll_interval=self.settings.dev_mode_poll_interval,
+                    notify_fn=self._build_dev_update_notify(),
+                )
             )
             logger.info("Dev mode active: auto-pull enabled.")
 
