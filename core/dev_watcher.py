@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -10,12 +11,22 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).parent.parent
 
 
-async def watch_for_updates(poll_interval: int = 60) -> None:
+async def watch_for_updates(
+    poll_interval: int = 300,
+    notify_fn: Callable[[], Awaitable[None]] | None = None,
+) -> None:
     """Periodically fetch from origin and restart if new commits are found.
 
     Uses FETCH_HEAD so no branch name is hard-coded — works regardless of
     which branch was cloned.  On a successful pull the process is replaced
     via os.execv so systemd (or any process supervisor) sees a clean restart.
+
+    Args:
+        poll_interval: Seconds between git fetch checks.
+        notify_fn: Optional async callable invoked (and awaited) after a
+            successful pull, before the process is replaced.  The engine
+            wires this to the active provider so users receive an
+            "Update complete" message on every auto-update.
     """
     repo = str(_PROJECT_ROOT)
     logger.info(
@@ -70,9 +81,18 @@ async def watch_for_updates(poll_interval: int = 60) -> None:
                 )
                 continue
 
-            logger.info("Dev mode: pull succeeded — restarting engine")
+            logger.info("Dev mode: pull succeeded — notifying provider then restarting")
+
+            # ── Notify provider before replacing the process ─────────────────
+            if notify_fn is not None:
+                try:
+                    await notify_fn()
+                except Exception:
+                    logger.exception("Dev mode: provider notification failed")
+
             # Replace the current process; supervisor will see PID unchanged.
             os.execv(sys.executable, [sys.executable] + sys.argv)
 
         except Exception:
             logger.exception("Dev mode watcher error")
+
