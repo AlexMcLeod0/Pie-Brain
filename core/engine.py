@@ -43,6 +43,7 @@ class Engine:
         )
         self.brain_registry = BrainRegistry(cloud_brain_semaphore=self.brain_sem)
         self._running = False
+        self._scheduler = None  # set in run()
         self._notify_callbacks: list[Callable[..., Awaitable[None]]] = []
         self._broadcast_callbacks: list[Callable[[str], Awaitable[None]]] = []
 
@@ -66,9 +67,11 @@ class Engine:
     # Public task API — providers call these instead of touching core.db
     # ------------------------------------------------------------------
 
-    async def submit_task(self, text: str, chat_id: int | None = None) -> int:
+    async def submit_task(
+        self, text: str, chat_id: int | None = None, metadata: dict | None = None
+    ) -> int:
         """Enqueue a new task and return its ID."""
-        return await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
+        return await enqueue_task(self.settings.db_path, text, metadata=metadata, chat_id=chat_id)
 
     async def get_task(self, task_id: int) -> Task | None:
         """Fetch a single task by ID."""
@@ -85,6 +88,13 @@ class Engine:
     async def mark_result_delivered(self, task_id: int) -> None:
         """Mark a task's result as delivered to the user."""
         await mark_notified(self.settings.db_path, task_id)
+
+    def schedule_daily(self, utc_time: str, description: str, metadata: dict) -> None:
+        """Register a new daily recurring job with the running scheduler."""
+        if self._scheduler is None:
+            logger.warning("schedule_daily called but scheduler is not running.")
+            return
+        self._scheduler.add_daily(utc_time, description, metadata)
 
     async def _notify(self, task_id: int) -> None:
         """Fetch the current task state and fan-out to all registered callbacks."""
@@ -104,6 +114,13 @@ class Engine:
         setup_logging(self.settings.log_dir)
         await init_db(self.settings.db_path)
         self._running = True
+
+        # Start scheduler (always; jobs are added dynamically via ScheduleTool)
+        from providers.scheduler import Scheduler
+        self._scheduler = Scheduler()
+        self._scheduler.register_engine(self)
+        asyncio.create_task(self._scheduler.run())
+        logger.info("Scheduler started.")
 
         # Start providers
         if self.settings.telegram_bot_token:
@@ -211,6 +228,9 @@ class Engine:
                         handoff=False,
                     )
                 tool = tool_cls()
+                # Inject engine reference for tools that opt in (e.g. ScheduleTool)
+                if hasattr(tool, "register_engine"):
+                    tool.register_engine(self)
                 # Inject task ID so tools can name output files unambiguously
                 params = {**router_output.params, "_task_id": task.id}
                 result = await tool.run_local(params)
