@@ -1,7 +1,5 @@
 import json
 import logging
-import os
-import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -165,24 +163,6 @@ async def get_recent_tasks(db_path: str, limit: int = 5) -> list[Task]:
         ) as cursor:
             rows = await cursor.fetchall()
     return [Task.from_row(r) for r in rows]
-
-
-# ---------------------------------------------------------------------------
-# Utility helpers
-# ---------------------------------------------------------------------------
-
-def atomic_write(path: str | Path, content: str) -> None:
-    """Write *content* to *path* atomically using a temp file + os.replace."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=".tmp_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, path)
-    except Exception:
-        os.unlink(tmp_path)
-        raise
 
 
 def setup_logging(log_dir: str, level: int = logging.INFO) -> None:
