@@ -39,37 +39,23 @@ class Engine:
         self.brain_registry = BrainRegistry(cloud_brain_semaphore=self.brain_sem)
         self._running = False
         self._notify_callbacks: list[Callable[..., Awaitable[None]]] = []
+        self._broadcast_callbacks: list[Callable[[str], Awaitable[None]]] = []
 
     def register_notify_callback(self, cb: Callable[..., Awaitable[None]]) -> None:
-        """Register a coroutine function called on every task status transition."""
+        """Register a coroutine called on every task status transition."""
         self._notify_callbacks.append(cb)
 
-    def _build_dev_update_notify(self):
-        """Return an async callable that broadcasts an update notice to all providers."""
-        settings = self.settings
+    def register_broadcast_callback(self, cb: Callable[[str], Awaitable[None]]) -> None:
+        """Register a coroutine called when the engine broadcasts a system message."""
+        self._broadcast_callbacks.append(cb)
 
-        async def _notify_update() -> None:
-            if settings.telegram_bot_token:
-                recipients = settings.telegram_allowed_user_ids
-                if not recipients:
-                    logger.warning(
-                        "Dev mode: no telegram_allowed_user_ids configured — skipping notification"
-                    )
-                    return
-                try:
-                    from telegram import Bot
-                    bot = Bot(token=settings.telegram_bot_token)
-                    for uid in recipients:
-                        try:
-                            await bot.send_message(chat_id=uid, text="Update complete")
-                        except Exception:
-                            logger.exception(
-                                "Dev mode: failed to notify Telegram user %d", uid
-                            )
-                except ImportError:
-                    logger.warning("Dev mode: Telegram not installed, skipping notification")
-
-        return _notify_update
+    async def broadcast_all(self, message: str) -> None:
+        """Fan a system message out to all registered providers."""
+        for cb in self._broadcast_callbacks:
+            try:
+                await cb(message)
+            except Exception:
+                logger.exception("Broadcast callback error")
 
     async def _notify(self, task_id: int) -> None:
         """Fetch the current task state and fan-out to all registered callbacks."""
@@ -125,7 +111,7 @@ class Engine:
             asyncio.create_task(
                 watch_for_updates(
                     poll_interval=self.settings.dev_mode_poll_interval,
-                    notify_fn=self._build_dev_update_notify(),
+                    notify_fn=lambda: self.broadcast_all("Update complete"),
                 )
             )
             logger.info("Dev mode active: auto-pull enabled.")
