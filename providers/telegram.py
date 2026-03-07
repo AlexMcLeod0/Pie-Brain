@@ -46,8 +46,22 @@ class TelegramProvider:
     # ------------------------------------------------------------------
 
     def register_engine(self, engine) -> None:  # noqa: ANN001
-        """Subscribe to engine task-status events."""
+        """Subscribe to engine task-status and broadcast events."""
         engine.register_notify_callback(self._on_task_update)
+        engine.register_broadcast_callback(self.broadcast)
+
+    async def broadcast(self, message: str) -> None:
+        """Push an unsolicited message to all allowed user IDs."""
+        recipients = self.settings.telegram_allowed_user_ids
+        if not recipients:
+            logger.warning("broadcast: no telegram_allowed_user_ids configured, skipping")
+            return
+        bot = Bot(token=self.settings.telegram_bot_token)
+        for uid in recipients:
+            try:
+                await bot.send_message(chat_id=uid, text=message)
+            except Exception:
+                logger.exception("broadcast: failed to send to user %d", uid)
 
     async def _on_task_update(self, task) -> None:
         """Push a status update to the originating chat on every engine transition."""
