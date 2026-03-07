@@ -2,6 +2,15 @@ import json
 from abc import ABC, abstractmethod
 
 
+class CloudBrainFallback(Exception):
+    """Raised by a tool's run_local() to signal that this task exceeds local
+    capability and should be re-dispatched to the configured cloud brain.
+
+    The engine catches this specifically in _handle() and calls _spawn_brain()
+    rather than marking the task as failed.
+    """
+
+
 class BaseTool(ABC):
     tool_name: str = ""
     routing_description: str = ""  # one-line hint used to build the router system prompt
