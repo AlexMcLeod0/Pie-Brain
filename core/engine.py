@@ -8,10 +8,15 @@ from typing import Awaitable
 import guardian
 from config.settings import get_settings
 from core.db import (
+    Task,
     TaskStatus,
     init_db,
+    enqueue_task,
     get_pending_tasks,
     get_task_by_id,
+    get_recent_tasks as _db_get_recent_tasks,
+    get_completed_unnotified,
+    mark_notified,
     update_task_status,
     setup_logging,
 )
@@ -56,6 +61,30 @@ class Engine:
                 await cb(message)
             except Exception:
                 logger.exception("Broadcast callback error")
+
+    # ------------------------------------------------------------------
+    # Public task API — providers call these instead of touching core.db
+    # ------------------------------------------------------------------
+
+    async def submit_task(self, text: str, chat_id: int | None = None) -> int:
+        """Enqueue a new task and return its ID."""
+        return await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
+
+    async def get_task(self, task_id: int) -> Task | None:
+        """Fetch a single task by ID."""
+        return await get_task_by_id(self.settings.db_path, task_id)
+
+    async def get_recent_tasks(self, limit: int = 5) -> list[Task]:
+        """Fetch the most recently created tasks, newest first."""
+        return await _db_get_recent_tasks(self.settings.db_path, limit=limit)
+
+    async def get_deliverable_results(self) -> list[Task]:
+        """Return completed tasks that have a chat_id but haven't been notified."""
+        return await get_completed_unnotified(self.settings.db_path)
+
+    async def mark_result_delivered(self, task_id: int) -> None:
+        """Mark a task's result as delivered to the user."""
+        await mark_notified(self.settings.db_path, task_id)
 
     async def _notify(self, task_id: int) -> None:
         """Fetch the current task state and fan-out to all registered callbacks."""

@@ -8,7 +8,7 @@ import lancedb
 import pyarrow as pa
 
 from config.settings import get_settings
-from core.db import atomic_write
+from core.utils import atomic_write
 from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)

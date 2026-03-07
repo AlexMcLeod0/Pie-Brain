@@ -8,14 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 
 import guardian
 from config.settings import get_settings
-from core.db import (
-    TaskStatus,
-    enqueue_task,
-    get_completed_unnotified,
-    get_recent_tasks,
-    get_task_by_id,
-    mark_notified,
-)
+from core.db import TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +26,7 @@ HELP_TEXT = (
 class TelegramProvider:
     def __init__(self) -> None:
         self.settings = get_settings()
+        self._engine = None  # set by register_engine before run() is called
         self.app = (
             Application.builder()
             .token(self.settings.telegram_bot_token)
@@ -47,6 +41,7 @@ class TelegramProvider:
 
     def register_engine(self, engine) -> None:  # noqa: ANN001
         """Subscribe to engine task-status and broadcast events."""
+        self._engine = engine
         engine.register_notify_callback(self._on_task_update)
         engine.register_broadcast_callback(self.broadcast)
 
@@ -136,7 +131,7 @@ class TelegramProvider:
             except ValueError:
                 await update.message.reply_text("Usage: /status [task_id]")
                 return
-            task = await get_task_by_id(self.settings.db_path, task_id)
+            task = await self._engine.get_task(task_id)
             if task is None:
                 await update.message.reply_text(f"Task #{task_id} not found.")
             else:
@@ -148,7 +143,7 @@ class TelegramProvider:
                     f"Request: {task.request_text[:120]}"
                 )
         else:
-            tasks = await get_recent_tasks(self.settings.db_path, limit=5)
+            tasks = await self._engine.get_recent_tasks(limit=5)
             if not tasks:
                 await update.message.reply_text("No tasks yet.")
                 return
@@ -178,7 +173,7 @@ class TelegramProvider:
             return
 
         try:
-            task_id = await enqueue_task(self.settings.db_path, text, chat_id=chat_id)
+            task_id = await self._engine.submit_task(text, chat_id=chat_id)
             await update.message.reply_text(f"Task #{task_id} queued.")
         except Exception as exc:
             logger.exception("Failed to enqueue task from user_id=%d", update.effective_user.id)
@@ -194,7 +189,7 @@ class TelegramProvider:
         interval = self.settings.telegram_result_poll_interval
         while True:
             try:
-                tasks = await get_completed_unnotified(self.settings.db_path)
+                tasks = await self._engine.get_deliverable_results()
                 for task in tasks:
                     await self._send_result(bot, task)
             except Exception:
@@ -227,7 +222,7 @@ class TelegramProvider:
 
         try:
             await bot.send_message(chat_id=task.chat_id, text=result_text)
-            await mark_notified(self.settings.db_path, task.id)
+            await self._engine.mark_result_delivered(task.id)
             logger.info("Delivered result for task #%d to chat_id=%d", task.id, task.chat_id)
         except Exception:
             logger.exception("Failed to deliver result for task #%d", task.id)
