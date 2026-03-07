@@ -22,6 +22,7 @@ from core.db import (
 )
 from core.router import Router, RouterOutput
 from tools import TOOL_REGISTRY
+from tools.base import CloudBrainFallback
 from brains.registry import BrainRegistry
 
 logger = logging.getLogger(__name__)
@@ -233,7 +234,25 @@ class Engine:
                     tool.register_engine(self)
                 # Inject task ID so tools can name output files unambiguously
                 params = {**router_output.params, "_task_id": task.id}
-                result = await tool.run_local(params)
+                try:
+                    result = await tool.run_local(params)
+                    try:
+                        await tool.post_task(params, result)
+                    except Exception:
+                        logger.exception("Task %d: post_task hook failed (ignored)", task.id)
+                except CloudBrainFallback as exc:
+                    logger.warning(
+                        "Task %d: local inference failed (%s); escalating to cloud brain",
+                        task.id, exc,
+                    )
+                    await update_task_status(
+                        db, task.id, TaskStatus.executing,
+                        tool_name=f"{router_output.tool_name}→cloud",
+                        metadata={"fallback_reason": str(exc)},
+                    )
+                    await self._notify(task.id)
+                    await self._spawn_brain(router_output.tool_name, params)
+                    # nohup subprocess writes result to inbox; task marked done below
 
             await update_task_status(db, task.id, TaskStatus.done, result=result)
             await self._notify(task.id)

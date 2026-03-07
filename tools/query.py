@@ -7,7 +7,7 @@ import ollama
 
 from config.settings import get_settings
 from core.utils import atomic_write
-from tools.base import BaseTool
+from tools.base import BaseTool, CloudBrainFallback
 
 logger = logging.getLogger(__name__)
 
@@ -189,5 +189,8 @@ class QueryTool(BaseTool):
             )
             return response["message"]["content"].strip()
         except Exception as exc:
-            logger.exception("Ollama error in query tool for question %r", question)
-            return f"Error getting answer: {exc}"
+            logger.warning(
+                "Local inference failed for question %r (%s); flagging for cloud brain",
+                question, exc,
+            )
+            raise CloudBrainFallback(str(exc)) from exc
