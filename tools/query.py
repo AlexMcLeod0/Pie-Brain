@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 CONTEXT_CHARS = 6000   # max chars of context fed to the LLM
 MAX_INBOX_FILES = 5    # cap on how many inbox files to pull into context
 MIN_KEYWORD_LEN = 4    # ignore short words (the, is, a, …) when scoring
+MAX_MEMORY_HITS = 3    # cap on LanceDB memory results included in context
+MEMORY_MIN_SIMILARITY = 0.4  # below this, memories are too distant to include
 
 SYSTEM_PROMPT = (
     "You are a knowledgeable assistant with access to previous research results. "
@@ -47,7 +49,14 @@ class QueryTool(BaseTool):
             raise ValueError("query tool requires a non-empty 'question' param")
 
         settings = get_settings()
-        context = self._gather_context(question, settings.brain_inbox)
+
+        # Gather context from inbox files (keyword) and LanceDB (semantic)
+        inbox_context = self._gather_context(question, settings.brain_inbox)
+        memory_context = await self._query_memory(question, settings)
+
+        context_parts = [p for p in (inbox_context, memory_context) if p]
+        context = "\n\n".join(context_parts)
+
         answer = await self._ask_ollama(question, context, settings)
 
         out_path = Path(settings.brain_inbox) / f"{task_id}_query.md"
@@ -56,7 +65,7 @@ class QueryTool(BaseTool):
         return answer
 
     # ------------------------------------------------------------------
-    # Context gathering
+    # Context gathering — inbox files (keyword-scored)
     # ------------------------------------------------------------------
 
     def _gather_context(self, question: str, inbox_path: str) -> str:
@@ -97,6 +106,66 @@ class QueryTool(BaseTool):
             total += len(chunk)
 
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Context gathering — LanceDB vector memory (semantic)
+    # ------------------------------------------------------------------
+
+    async def _query_memory(self, question: str, settings) -> str:
+        """Return semantically relevant stored memories as a context block.
+
+        Skipped silently if the memory DB doesn't exist or is empty.
+        Uses the same embedding singleton as MemoryTool to avoid loading
+        SentenceTransformer twice on the Pi.
+        """
+        try:
+            results = await asyncio.to_thread(
+                self._query_memory_sync,
+                question,
+                settings.memory_db_path,
+                settings.memory_embedding_model,
+            )
+        except Exception:
+            logger.warning("Memory vector search failed; skipping.", exc_info=True)
+            return ""
+
+        if not results:
+            return ""
+
+        lines = ["--- stored memories ---"]
+        for r in results:
+            lines.append(f"[relevance={r['similarity']:.2f}] {r['content']}")
+        logger.debug("Memory context: %d hit(s) for %r", len(results), question)
+        return "\n".join(lines)
+
+    def _query_memory_sync(
+        self, query_text: str, db_path: str, model_name: str
+    ) -> list[dict]:
+        """Blocking LanceDB search — called via asyncio.to_thread."""
+        import lancedb
+        from tools.memory import TABLE_NAME, _embed  # reuse module-level encoder singleton
+
+        db = lancedb.connect(db_path)
+        if TABLE_NAME not in db.list_tables():
+            return []
+
+        table = db.open_table(TABLE_NAME)
+        if table.count_rows() == 0:
+            return []
+
+        vec = _embed(query_text, model_name)
+        hits = (
+            table.search(vec)
+            .metric("cosine")
+            .limit(MAX_MEMORY_HITS)
+            .to_list()
+        )
+
+        return [
+            {"content": h["content"], "similarity": 1.0 - h["_distance"]}
+            for h in hits
+            if (1.0 - h["_distance"]) >= MEMORY_MIN_SIMILARITY
+        ]
 
     # ------------------------------------------------------------------
     # LLM call
