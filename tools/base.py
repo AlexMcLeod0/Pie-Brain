@@ -22,6 +22,12 @@ class BaseTool(ABC):
     async def run_local(self, params: dict) -> str | None:
         """Execute the tool locally on the Pi. Return a result string to deliver to the user, or None."""
 
+    async def post_task(self, params: dict, result: str | None) -> None:
+        """Called by the engine after run_local() succeeds. Override for post-task side-effects.
+
+        Failures here are logged but never propagate — the task is already done.
+        """
+
     def get_spawn_cmd(self, params: dict) -> str:
         """Return a shell command to run this tool as a subprocess."""
         params_json = json.dumps(params)

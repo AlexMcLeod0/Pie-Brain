@@ -30,12 +30,38 @@ class ArxivTool(BaseTool):
         ),
     ]
 
+    def __init__(self) -> None:
+        self._fetched_papers: list = []  # populated during run_local, read in post_task
+
     async def run_local(self, params: dict) -> None:
+        self._fetched_papers = []
         mode = params.get("mode", "search")
         if mode == "discover":
             await self._daily_discover(params)
         else:
             await self._specific_search(params)
+
+    async def post_task(self, params: dict, result: str | None) -> None:
+        """Store each fetched paper (title + full abstract) to LanceDB memory."""
+        if not self._fetched_papers:
+            return
+
+        from tools.memory import MemoryTool
+        memory = MemoryTool()
+
+        for paper in self._fetched_papers:
+            short_id = paper.entry_id.split("/abs/")[-1]
+            authors = ", ".join(a.name for a in paper.authors[:5])
+            content = (
+                f"{paper.title}\n\n"
+                f"Authors: {authors}\n"
+                f"Published: {paper.published.strftime('%Y-%m-%d') if paper.published else 'unknown'}\n\n"
+                f"{paper.summary.replace(chr(10), ' ').strip()}"
+            )
+            # _store handles dedup internally (logs duplicates at INFO level)
+            await memory._store({"content": content, "source_path": short_id})
+
+        logger.info("ArXiv post-task: submitted %d paper(s) to memory.", len(self._fetched_papers))
 
     # ------------------------------------------------------------------
 
@@ -62,6 +88,7 @@ class ArxivTool(BaseTool):
         logger.info("ArXiv specific search: id=%r query=%r", paper_id, query)
         client = arxiv.Client()
         papers = await asyncio.to_thread(list, client.results(search))
+        self._fetched_papers.extend(papers)
 
         content = self._format_papers(f"ArXiv: {query or paper_id}", papers)
         self._write_output(f"arxiv_search_{slug}.md", content, params.get("_task_id"))
@@ -95,6 +122,7 @@ class ArxivTool(BaseTool):
                 if paper.entry_id not in seen:
                     seen.add(paper.entry_id)
                     papers.append(paper)
+        self._fetched_papers.extend(papers)
 
         generated_at = datetime.now(tz=timezone.utc)
         content = self._format_papers(

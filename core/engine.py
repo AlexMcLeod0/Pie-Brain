@@ -236,6 +236,10 @@ class Engine:
                 params = {**router_output.params, "_task_id": task.id}
                 try:
                     result = await tool.run_local(params)
+                    try:
+                        await tool.post_task(params, result)
+                    except Exception:
+                        logger.exception("Task %d: post_task hook failed (ignored)", task.id)
                 except CloudBrainFallback as exc:
                     logger.warning(
                         "Task %d: local inference failed (%s); escalating to cloud brain",
