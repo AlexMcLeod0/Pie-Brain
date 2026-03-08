@@ -79,6 +79,9 @@ class TelegramProvider:
         elif status == TaskStatus.failed:
             err = (task.metadata or {}).get("error", "unknown error")
             text = f"Task #{task.id} failed: {err}"
+        elif status == TaskStatus.dead:
+            err = (task.metadata or {}).get("error", "unknown error")
+            text = f"Task #{task.id} permanently failed after {task.attempt} attempt(s): {err}"
         else:
             return
 

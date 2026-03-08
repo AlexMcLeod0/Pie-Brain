@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     metadata    TEXT    DEFAULT '{}',
     chat_id     INTEGER,
     notified    INTEGER NOT NULL DEFAULT 0,
-    result      TEXT
+    result      TEXT,
+    attempt     INTEGER NOT NULL DEFAULT 0,
+    retry_after TEXT
 );
 """
 
@@ -29,6 +31,7 @@ class TaskStatus(str, Enum):
     executing = "executing"
     done = "done"
     failed = "failed"
+    dead = "dead"  # exhausted all retry attempts
 
 
 class Task(BaseModel):
@@ -40,6 +43,8 @@ class Task(BaseModel):
     chat_id: int | None = None
     notified: bool = False
     result: str | None = None
+    attempt: int = 0
+    retry_after: str | None = None  # ISO-8601 UTC; None means "ready now"
 
     @classmethod
     def from_row(cls, row: aiosqlite.Row) -> "Task":
@@ -52,6 +57,8 @@ class Task(BaseModel):
             chat_id=row["chat_id"],
             notified=bool(row["notified"]),
             result=row["result"],
+            attempt=row["attempt"] or 0,
+            retry_after=row["retry_after"],
         )
 
 
@@ -60,12 +67,17 @@ async def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(DB_SCHEMA)
-        # Migrate existing databases that predate the result column.
-        try:
-            await db.execute("ALTER TABLE tasks ADD COLUMN result TEXT")
-            await db.commit()
-        except aiosqlite.OperationalError:
-            pass  # column already exists
+        # Migrate existing databases that predate newer columns.
+        for migration in (
+            "ALTER TABLE tasks ADD COLUMN result TEXT",
+            "ALTER TABLE tasks ADD COLUMN attempt INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN retry_after TEXT",
+        ):
+            try:
+                await db.execute(migration)
+                await db.commit()
+            except aiosqlite.OperationalError:
+                pass  # column already exists
     logger.info("Database initialised at %s", db_path)
 
 
@@ -86,15 +98,37 @@ async def enqueue_task(
 
 
 async def get_pending_tasks(db_path: str) -> list[Task]:
-    """Fetch all tasks with status=pending."""
+    """Fetch pending tasks that are ready to run (retry_after has elapsed or is unset)."""
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM tasks WHERE status = ? ORDER BY id ASC",
+            """SELECT * FROM tasks
+               WHERE status = ?
+                 AND (retry_after IS NULL OR retry_after <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+               ORDER BY id ASC""",
             (TaskStatus.pending.value,),
         ) as cursor:
             rows = await cursor.fetchall()
     return [Task.from_row(r) for r in rows]
+
+
+async def reset_for_retry(
+    db_path: str,
+    task_id: int,
+    next_attempt: int,
+    retry_after: str,
+    metadata: dict | None = None,
+) -> None:
+    """Reset a failed task back to pending for its next retry attempt."""
+    fields = ["status = ?", "attempt = ?", "retry_after = ?"]
+    values: list = [TaskStatus.pending.value, next_attempt, retry_after]
+    if metadata is not None:
+        fields.append("metadata = ?")
+        values.append(json.dumps(metadata))
+    values.append(task_id)
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(f"UPDATE tasks SET {', '.join(fields)} WHERE id = ?", values)
+        await db.commit()
 
 
 async def update_task_status(
