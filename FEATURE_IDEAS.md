@@ -1,15 +1,16 @@
 # Pie-Brain Feature Ideas
 
 > Generated 2026-03-07. Use this document to evaluate and prioritise potential additions before scheduling development work.
+> Last reviewed 2026-03-08.
+>
+> **Completed / already implemented:** Tool auto-discovery (engine + installer), Unified notification delivery (Telegram push + polling fallback, idempotent `notified` flag).
 
 ---
 
 ## Priority 1 — Foundation *(ship before wide release)*
 
-### Tool Auto-Discovery
-**What:** Auto-load any `BaseTool` subclass found in the `tools/` directory at startup, without manual registration in core code.
-**Why:** Contributors can add a tool by dropping a single file — no changes to engine or registry required. Critical for the "open source standard" goal.
-**Priority:** P1
+### ~~Tool Auto-Discovery~~ ✅ Done
+Already implemented: `tools/__init__.py` uses `pkgutil.iter_modules` at import time; `setup.sh` dynamically discovers tools from the filesystem and reads descriptions from `routing_description` via ast.
 
 ---
 
@@ -27,10 +28,10 @@
 
 ---
 
-### Unified Notification Delivery
-**What:** After a task completes, the engine optionally pushes the result back through the provider that originated the task (e.g. reply to the Telegram message that spawned it).
-**Why:** Output currently lands only in `~/brain/inbox/`. Without return delivery, async results are invisible to users who aren't watching the filesystem.
-**Priority:** P1
+### ~~Unified Notification Delivery~~ ✅ Done
+Already implemented: Telegram provider pushes live status updates on every engine transition and delivers the final result via `_send_result()` (checks `task.result` then globs inbox files). A background polling loop catches any results missed by the push path. `mark_result_delivered()` is only called after a successful send, so transient Telegram outages are retried automatically.
+
+Remaining gap (low priority): future providers (REST API, MQTT) will need to implement the same `register_notify_callback` + delivery pattern — but that work belongs to those provider features, not here.
 
 ---
 
@@ -128,10 +129,10 @@
 
 | Feature | Priority | Area |
 |---|---|---|
-| Tool auto-discovery | P1 | Core |
+| ~~Tool auto-discovery~~ ✅ | Done | Core |
 | Health watchdog & supervisor | P1 | Ops |
 | Task retry / dead-letter queue | P1 | Core |
-| Unified notification delivery | P1 | Providers |
+| ~~Unified notification delivery~~ ✅ | Done | Providers |
 | REST API provider | P2 | Providers |
 | Simple status dashboard | P2 | Ops |
 | Brain cost / token tracker | P2 | Observability |
