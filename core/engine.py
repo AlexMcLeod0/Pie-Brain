@@ -23,6 +23,7 @@ from core.db import (
     setup_logging,
 )
 from core.router import Router, RouterOutput
+from core.watchdog import sd_notify, watchdog_heartbeat
 from tools import TOOL_REGISTRY
 from tools.base import CloudBrainFallback
 from brains.registry import BrainRegistry
@@ -145,6 +146,11 @@ class Engine:
             self.settings.ollama_model,
             self.settings.default_cloud_brain,
         )
+
+        # Start watchdog heartbeat; signals READY=1 once before the loop begins.
+        asyncio.create_task(watchdog_heartbeat(interval=30))
+        sd_notify("READY=1")
+        await self.broadcast_all("Engine online.")
 
         # Start hot-module watcher
         asyncio.create_task(
