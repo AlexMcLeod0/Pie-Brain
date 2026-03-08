@@ -45,6 +45,7 @@ tool_description() {
         arxiv)    echo "ArXiv paper search and daily discovery" ;;
         memory)   echo "Persistent vector memory with deduplication (LanceDB)" ;;
         git_sync) echo "Git repo sync and PR creation" ;;
+        schedule) echo "Cron-style task scheduling and heartbeat jobs" ;;
         *)        echo "no description available" ;;
     esac
 }
@@ -328,35 +329,53 @@ case "${_prov_num:-1}" in
 esac
 success "Messaging provider: ${PROVIDER}"
 
+# ─── Clone repository ─────────────────────────────────────────────────────────
+# Cloned before tool selection so available tools can be discovered dynamically.
+echo
+info "Cloning repository into ${INSTALL_DIR}…"
+tmp_dir="$(mktemp -d)"
+git clone --depth 1 "$REPO_URL" "$tmp_dir"
+rsync -a --delete "$tmp_dir/" "$INSTALL_DIR/"
+rm -rf "$tmp_dir"
+cd "$INSTALL_DIR"
+
 # ─── Tool selection ───────────────────────────────────────────────────────────
+# Discover optional tools from the cloned tools/ directory — no hardcoded list.
+# 'query' is always included and excluded from user-facing choices.
+_all_optional_tools=()
+for _f in tools/*.py; do
+    [[ -f "$_f" ]] || continue
+    _stem="$(basename "$_f" .py)"
+    case "$_stem" in __init__|base|runner|query) continue ;; esac
+    _all_optional_tools+=("$_stem")
+done
+
 echo
 echo -e "${BOLD}Which tools should be installed?${RESET}"
 echo "  Enter space-separated numbers, 'all', or 'none'."
 echo "  Note: the 'query' tool is always installed (required for routing fallback)."
 echo
-echo "  1) arxiv     — ArXiv paper search and daily discovery"
-echo "  2) memory    — Persistent vector memory with deduplication (LanceDB)"
-echo "  3) git_sync  — Git repo sync and PR creation  (requires git + gh CLI)"
+_idx=1
+for _t in "${_all_optional_tools[@]}"; do
+    printf "  %d) %-12s — %s\n" "$_idx" "$_t" "$(tool_description "$_t")"
+    _idx=$(( _idx + 1 ))
+done
 echo
 read -rp "  Choices [all]: " _tools_input
 _tools_input="${_tools_input:-all}"
-
-# All optional tools (query is always included, not listed here)
-_all_optional_tools=(arxiv memory git_sync)
 
 TOOLS=()
 if [[ "$_tools_input" == "none" ]]; then
     :
 elif [[ "$_tools_input" == "all" ]]; then
-    TOOLS=(arxiv memory git_sync)
+    TOOLS=("${_all_optional_tools[@]}")
 else
     for _n in $_tools_input; do
-        case "$_n" in
-            1) TOOLS+=(arxiv) ;;
-            2) TOOLS+=(memory) ;;
-            3) TOOLS+=(git_sync) ;;
-            *) warn "Unknown tool number '${_n}', skipping." ;;
-        esac
+        if [[ "$_n" =~ ^[0-9]+$ ]] && (( _n >= 1 && _n <= ${#_all_optional_tools[@]} )); then
+            TOOLS+=("${_all_optional_tools[$(( _n - 1 ))]}")
+        else
+            warn "Unknown tool number '${_n}', skipping."
+        fi
     done
 fi
 success "Tools: query (always) + ${TOOLS[*]:-none}"
@@ -374,15 +393,6 @@ done
 if [[ " ${TOOLS[*]} " == *" git_sync "* ]] && ! command -v gh &>/dev/null; then
     warn "'gh' CLI not found — required by git_sync. Install: https://cli.github.com"
 fi
-
-# ─── Clone repository ─────────────────────────────────────────────────────────
-echo
-info "Cloning repository into ${INSTALL_DIR}…"
-tmp_dir="$(mktemp -d)"
-git clone --depth 1 "$REPO_URL" "$tmp_dir"
-rsync -a --delete "$tmp_dir/" "$INSTALL_DIR/"
-rm -rf "$tmp_dir"
-cd "$INSTALL_DIR"
 
 # ─── Prune unselected files ───────────────────────────────────────────────────
 # The auto-discovery registries (tools/__init__.py, brains/registry.py) use
@@ -424,9 +434,11 @@ echo
 info "Installing Python dependencies…"
 
 EXTRAS=()
-[[ "$PROVIDER" == "telegram" ]]              && EXTRAS+=(telegram)
-[[ " ${TOOLS[*]} " == *" arxiv "* ]]         && EXTRAS+=(arxiv)
-[[ " ${TOOLS[*]} " == *" memory "* ]]        && EXTRAS+=(memory)
+[[ "$PROVIDER" == "telegram" ]] && EXTRAS+=(telegram)
+for _t in ${TOOLS[@]+"${TOOLS[@]}"}; do
+    _ex="$(tool_extras "$_t")"
+    [[ -n "$_ex" ]] && EXTRAS+=("$_ex")
+done
 
 if [[ ${#EXTRAS[@]} -gt 0 ]]; then
     _extra_args=()
