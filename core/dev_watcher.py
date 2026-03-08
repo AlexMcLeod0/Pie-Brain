@@ -42,20 +42,31 @@ async def watch_for_updates(
             fetch = await asyncio.create_subprocess_exec(
                 "git", "-C", repo, "fetch", "origin",
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-            rc = await fetch.wait()
-            if rc != 0:
-                logger.warning("Dev mode: git fetch failed (rc=%d), skipping", rc)
+            _, fetch_err = await fetch.communicate()
+            if fetch.returncode != 0:
+                logger.warning(
+                    "Dev mode: git fetch failed (rc=%d): %s",
+                    fetch.returncode,
+                    fetch_err.decode().strip(),
+                )
                 continue
 
             # ── Count commits we're behind FETCH_HEAD ────────────────────────
             behind_proc = await asyncio.create_subprocess_exec(
                 "git", "-C", repo, "rev-list", "HEAD..FETCH_HEAD", "--count",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await behind_proc.communicate()
+            stdout, behind_err = await behind_proc.communicate()
+            if behind_proc.returncode != 0:
+                logger.warning(
+                    "Dev mode: git rev-list failed (rc=%d): %s",
+                    behind_proc.returncode,
+                    behind_err.decode().strip(),
+                )
+                continue
             count = int(stdout.decode().strip() or "0")
 
             if count == 0:
@@ -71,13 +82,14 @@ async def watch_for_updates(
             pull = await asyncio.create_subprocess_exec(
                 "git", "-C", repo, "pull", "--rebase",
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-            rc = await pull.wait()
-            if rc != 0:
+            _, pull_err = await pull.communicate()
+            if pull.returncode != 0:
                 logger.warning(
-                    "Dev mode: git pull --rebase failed (rc=%d), skipping restart",
-                    rc,
+                    "Dev mode: git pull --rebase failed (rc=%d): %s",
+                    pull.returncode,
+                    pull_err.decode().strip(),
                 )
                 continue
 
