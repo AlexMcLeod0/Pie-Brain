@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable
 
@@ -17,6 +18,7 @@ from core.db import (
     get_recent_tasks as _db_get_recent_tasks,
     get_completed_unnotified,
     mark_notified,
+    reset_for_retry,
     update_task_status,
     setup_logging,
 )
@@ -28,6 +30,7 @@ from brains.registry import BrainRegistry
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 2.0  # seconds between DB polls
+MAX_ATTEMPTS = 3     # tasks that fail this many times are moved to dead status
 
 
 class Engine:
@@ -258,11 +261,29 @@ class Engine:
             await self._notify(task.id)
 
         except Exception as exc:
-            logger.exception("Task %d failed: %s", task.id, exc)
-            await update_task_status(
-                db, task.id, TaskStatus.failed,
-                metadata={"error": str(exc)},
-            )
+            next_attempt = task.attempt + 1
+            if next_attempt < MAX_ATTEMPTS:
+                delay = 2 ** next_attempt  # 2s, 4s for attempts 1, 2
+                retry_after = (
+                    datetime.now(timezone.utc) + timedelta(seconds=delay)
+                ).strftime("%Y-%m-%dT%H:%M:%SZ")
+                logger.warning(
+                    "Task %d failed (attempt %d/%d): %s — retrying in %ds",
+                    task.id, next_attempt, MAX_ATTEMPTS, exc, delay,
+                )
+                await reset_for_retry(
+                    db, task.id, next_attempt, retry_after,
+                    metadata={"error": str(exc), "attempt": next_attempt},
+                )
+            else:
+                logger.error(
+                    "Task %d permanently failed after %d attempts: %s",
+                    task.id, MAX_ATTEMPTS, exc,
+                )
+                await update_task_status(
+                    db, task.id, TaskStatus.dead,
+                    metadata={"error": str(exc), "attempt": next_attempt},
+                )
             await self._notify(task.id)
 
     async def _spawn_brain(self, tool_name: str, params: dict) -> None:
