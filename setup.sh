@@ -39,15 +39,48 @@ update_env_var() {
     mv "$tmp" "$file"
 }
 
-# Human-readable description for a tool stem name
+# Human-readable description for a tool stem name.
+# Reads routing_description directly from the tool's Python source via ast —
+# no hardcoded list needed; new tools are picked up automatically.
 tool_description() {
-    case "$1" in
-        arxiv)    echo "ArXiv paper search and daily discovery" ;;
-        memory)   echo "Persistent vector memory with deduplication (LanceDB)" ;;
-        git_sync) echo "Git repo sync and PR creation" ;;
-        schedule) echo "Cron-style task scheduling and heartbeat jobs" ;;
-        *)        echo "no description available" ;;
-    esac
+    local f="tools/${1}.py"
+    [[ -f "$f" ]] || { echo "no description available"; return; }
+    python3 - "$f" <<'PYEOF'
+import ast, sys
+try:
+    for node in ast.walk(ast.parse(open(sys.argv[1]).read())):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                for t in getattr(item, 'targets', []):
+                    if (getattr(t, 'id', '') == 'routing_description'
+                            and isinstance(getattr(item, 'value', None), ast.Constant)):
+                        print(item.value.s); sys.exit(0)
+except Exception:
+    pass
+print('no description available')
+PYEOF
+}
+
+# Returns "true" if the tool Python file declares required = True.
+# Required tools are always active and never offered to the user for removal.
+# Accepts a file path (relative or absolute) so it works before cd into INSTALL_DIR.
+tool_required() {
+    [[ -f "$1" ]] || { echo "false"; return; }
+    python3 - "$1" <<'PYEOF'
+import ast, sys
+try:
+    for node in ast.walk(ast.parse(open(sys.argv[1]).read())):
+        if isinstance(node, ast.ClassDef):
+            for item in node.body:
+                for t in getattr(item, 'targets', []):
+                    if (getattr(t, 'id', '') == 'required'
+                            and isinstance(getattr(item, 'value', None), ast.Constant)
+                            and item.value.value is True):
+                        print('true'); sys.exit(0)
+except Exception:
+    pass
+print('false')
+PYEOF
 }
 
 # uv extras flag needed for a tool's dependencies (empty = base deps only)
@@ -152,7 +185,8 @@ if [[ "$MODE" == "update" ]]; then
     for _f in "${INSTALL_DIR}/tools/"*.py; do
         [[ -f "$_f" ]] || continue
         _stem="$(basename "$_f" .py)"
-        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        case "$_stem" in __init__|base|runner) continue ;; esac
+        [[ "$(tool_required "$_f")" == "true" ]] && continue
         _installed_before+=("$_stem")
     done
 
@@ -176,12 +210,13 @@ if [[ "$MODE" == "update" ]]; then
     cd "$INSTALL_DIR"
 
     # ── Discover optional tools available after the pull ─────────────────────
-    # (query is always kept and excluded from user-facing choices)
+    # Required tools (required = True) are always kept and excluded from choices.
     _available_now=()
     for _f in tools/*.py; do
         [[ -f "$_f" ]] || continue
         _stem="$(basename "$_f" .py)"
-        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        case "$_stem" in __init__|base|runner) continue ;; esac
+        [[ "$(tool_required "$_f")" == "true" ]] && continue
         _available_now+=("$_stem")
     done
 
@@ -237,11 +272,12 @@ if [[ "$MODE" == "update" ]]; then
         fi
     fi
 
-    # ── Prune tools not in the keep list (query is never pruned) ─────────────
+    # ── Prune tools not in the keep list (required tools are never pruned) ───
     for _f in tools/*.py; do
         [[ -f "$_f" ]] || continue
         _stem="$(basename "$_f" .py)"
-        case "$_stem" in __init__|base|runner|query) continue ;; esac
+        case "$_stem" in __init__|base|runner) continue ;; esac
+        [[ "$(tool_required "$_f")" == "true" ]] && continue
         _keep=0
         for _t in ${_tools_to_keep[@]+"${_tools_to_keep[@]}"}; do
             [[ "$_t" == "$_stem" ]] && _keep=1 && break
@@ -341,19 +377,20 @@ cd "$INSTALL_DIR"
 
 # ─── Tool selection ───────────────────────────────────────────────────────────
 # Discover optional tools from the cloned tools/ directory — no hardcoded list.
-# 'query' is always included and excluded from user-facing choices.
+# Tools with required = True are always active and excluded from user-facing choices.
 _all_optional_tools=()
 for _f in tools/*.py; do
     [[ -f "$_f" ]] || continue
     _stem="$(basename "$_f" .py)"
-    case "$_stem" in __init__|base|runner|query) continue ;; esac
+    case "$_stem" in __init__|base|runner) continue ;; esac
+    [[ "$(tool_required "$_f")" == "true" ]] && continue
     _all_optional_tools+=("$_stem")
 done
 
 echo
 echo -e "${BOLD}Which tools should be installed?${RESET}"
 echo "  Enter space-separated numbers, 'all', or 'none'."
-echo "  Note: the 'query' tool is always installed (required for routing fallback)."
+echo "  Note: required tools (e.g. query) are always installed and not listed here."
 echo
 _idx=1
 for _t in "${_all_optional_tools[@]}"; do
@@ -413,10 +450,11 @@ if [[ "$PROVIDER" == "none" ]]; then
 fi
 
 # Tools — remove any optional tool not selected by the user.
-# 'query' is always kept; it is the routing fallback and cannot be disabled.
+# Required tools (required = True) are always kept and cannot be disabled.
 for _f in tools/*.py; do
     _stem="$(basename "$_f" .py)"
-    case "$_stem" in __init__|base|runner|query) continue ;; esac
+    case "$_stem" in __init__|base|runner) continue ;; esac
+    [[ "$(tool_required "$_f")" == "true" ]] && continue
     _keep=0
     for _t in ${TOOLS[@]+"${TOOLS[@]}"}; do
         [[ "$_t" == "$_stem" ]] && _keep=1 && break
