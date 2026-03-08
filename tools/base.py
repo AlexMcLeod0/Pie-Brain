@@ -17,6 +17,8 @@ class BaseTool(ABC):
     # Few-shot examples: list of (user_message, params_json) pairs.
     # The router embeds these verbatim so the model sees concrete input→output patterns.
     routing_examples: list[tuple[str, str]] = []
+    # Set to True on tools that are always required and must never be disabled/pruned.
+    required: bool = False
 
     @abstractmethod
     async def run_local(self, params: dict) -> str | None:

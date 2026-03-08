@@ -27,6 +27,7 @@ SYSTEM_PROMPT = (
 
 class QueryTool(BaseTool):
     tool_name = "query"
+    required = True
     routing_description = (
         "answer a question about previous results or casual conversation; "
         'params must include {"question": "<the user\'s full message>"}'
