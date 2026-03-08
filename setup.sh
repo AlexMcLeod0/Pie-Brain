@@ -595,11 +595,17 @@ Description=Pie-Brain task routing engine
 After=network.target
 
 [Service]
-Type=simple
+# Type=notify: systemd waits for READY=1 from the engine before marking
+# the service started, and kills/restarts if WATCHDOG=1 stops arriving.
+Type=notify
+WatchdogSec=120
 WorkingDirectory=${INSTALL_DIR}
 ExecStart=${UV_BIN} run --directory ${INSTALL_DIR} python -m core.engine
 Restart=on-failure
-RestartSec=5
+RestartSec=10
+# Allow up to 5 restarts per 5 minutes before systemd gives up.
+StartLimitBurst=5
+StartLimitIntervalSec=300
 StandardOutput=journal
 StandardError=journal
 
@@ -609,6 +615,8 @@ EOF
 
             systemctl --user daemon-reload
             systemctl --user enable pie-brain.service
+            # Enable linger so the service starts at boot without an interactive login.
+            loginctl enable-linger "$USER"
             success "Service installed. Start with: systemctl --user start pie-brain"
             ;;
     esac
