@@ -1,7 +1,8 @@
 """Memory tool — LanceDB vector store with sentence-transformers dedup."""
 import asyncio
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import lancedb
@@ -16,6 +17,27 @@ logger = logging.getLogger(__name__)
 SIMILARITY_THRESHOLD = 0.8
 TABLE_NAME = "memories"
 CONTENT_TRUNCATE = 600
+
+# Maps relative-time phrases to how far back they reach.
+_RECENCY_PATTERNS: list[tuple[str, timedelta]] = [
+    (r"\btoday\b", timedelta(days=1)),
+    (r"\byesterday\b", timedelta(days=2)),
+    (r"\blast\s+(?:24\s*h(?:ours?)?)\b", timedelta(days=1)),
+    (r"\blast\s+(?:2\s+days?|48\s*h(?:ours?)?)\b", timedelta(days=2)),
+    (r"\blast\s+week\b", timedelta(days=14)),  # generous: covers pull + lag
+    (r"\bthis\s+week\b", timedelta(days=7)),
+    (r"\brecent(?:ly)?\b", timedelta(days=7)),
+    (r"\bthis\s+month\b", timedelta(days=31)),
+]
+
+
+def _parse_recency(query_text: str) -> datetime | None:
+    """Return a UTC cutoff if the query contains relative time words, else None."""
+    now = datetime.now(tz=timezone.utc)
+    for pattern, delta in _RECENCY_PATTERNS:
+        if re.search(pattern, query_text, re.IGNORECASE):
+            return now - delta
+    return None
 
 # Module-level encoder singleton — loading is expensive on Pi 4.
 _encoder = None
@@ -109,16 +131,23 @@ class MemoryTool(BaseTool):
         if not query_text:
             raise ValueError("Memory query requires 'query' in params")
 
-        logger.info("Memory query: %r (top_k=%d)", query_text, top_k)
+        since = _parse_recency(query_text)
+        if since:
+            logger.info(
+                "Memory query: %r (top_k=%d, since=%s)",
+                query_text, top_k, since.strftime("%Y-%m-%dT%H:%M UTC"),
+            )
+        else:
+            logger.info("Memory query: %r (top_k=%d)", query_text, top_k)
         settings = get_settings()
 
         results = await asyncio.to_thread(
             self._query_sync,
-            query_text, top_k,
+            query_text, top_k, since,
             settings.memory_db_path, settings.memory_embedding_model,
         )
 
-        content = self._format_results(query_text, results)
+        content = self._format_results(query_text, results, since=since)
         task_id = params.get("_task_id")
         prefix = f"{task_id}_" if task_id is not None else ""
         out_path = Path(settings.brain_inbox) / f"{prefix}memory_query.md"
@@ -169,6 +198,7 @@ class MemoryTool(BaseTool):
         self,
         query_text: str,
         top_k: int,
+        since: datetime | None,
         db_path: str,
         model_name: str,
     ) -> list[dict]:
@@ -183,12 +213,12 @@ class MemoryTool(BaseTool):
             return []
 
         vec = _embed(query_text, model_name)
-        hits = (
-            table.search(vec)
-            .metric("cosine")
-            .limit(top_k)
-            .to_list()
-        )
+        search = table.search(vec).metric("cosine")
+        if since is not None:
+            # created_at is stored as ISO-8601 UTC strings; lexicographic
+            # ordering is equivalent to chronological ordering for that format.
+            search = search.where(f"created_at >= '{since.strftime('%Y-%m-%dT%H:%M:%S')}'")
+        hits = search.limit(top_k).to_list()
 
         return [
             {
@@ -202,8 +232,12 @@ class MemoryTool(BaseTool):
 
     # ------------------------------------------------------------------
 
-    def _format_results(self, query_text: str, results: list[dict]) -> str:
+    def _format_results(
+        self, query_text: str, results: list[dict], since: datetime | None = None
+    ) -> str:
         lines: list[str] = [f"# Memory Query: {query_text!r}", ""]
+        if since is not None:
+            lines += [f"_Filtered to memories stored on or after {since.strftime('%Y-%m-%d %H:%M UTC')}_", ""]
 
         if not results:
             lines.append("_No memories found._")
