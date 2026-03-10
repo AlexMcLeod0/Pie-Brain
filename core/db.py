@@ -225,3 +225,7 @@ def setup_logging(log_dir: str, level: int = logging.INFO) -> None:
     root.setLevel(level)
     root.addHandler(handler)
     root.addHandler(stream_handler)
+
+    # Silence chatty third-party libraries (httpx fires on every Telegram poll tick).
+    for noisy in ("httpx", "httpcore", "telegram", "apscheduler"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

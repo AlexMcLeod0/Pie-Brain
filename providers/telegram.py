@@ -72,6 +72,28 @@ class TelegramProvider:
             tool = task.tool_name or "unknown"
             text = f"Task #{task.id}: executing via {tool}\u2026"
         elif status == TaskStatus.done:
+            # Cloud-brain tasks are spawned via nohup; the subprocess is still
+            # running when we reach this callback.  Skip _send_result (which
+            # would race and find no inbox file yet) and instead send a brief
+            # acknowledgement *without* calling mark_result_delivered.  The
+            # polling loop in _deliver_results will call _send_result again
+            # every interval until the inbox file appears.
+            is_cloud = task.metadata.get("handoff") or (
+                task.tool_name and "\u2192cloud" in task.tool_name
+            )
+            if is_cloud:
+                logger.info(
+                    "Task #%d (%s): cloud brain running; deferring delivery to polling loop",
+                    task.id, task.tool_name,
+                )
+                try:
+                    await bot.send_message(
+                        chat_id=task.chat_id,
+                        text=f"Task #{task.id}: cloud brain is working on it \u2014 result on the way.",
+                    )
+                except Exception:
+                    logger.exception("Failed to push cloud-handoff notice for task #%d", task.id)
+                return  # notified stays 0; polling loop delivers the real result
             # _send_result handles file lookup + mark_notified so the polling
             # fallback won't double-deliver.
             await self._send_result(bot, task)
@@ -200,18 +222,30 @@ class TelegramProvider:
             await asyncio.sleep(interval)
 
     async def _send_result(self, bot: Bot, task) -> None:
-        """Send the completed task result to the originating chat."""
-        result_text = f"Task #{task.id} complete (tool: {task.tool_name or 'unknown'})."
+        """Send the completed task result to the originating chat.
+
+        For cloud-brain tasks the inbox file may not exist yet when this is
+        called from the polling loop.  If no content is found for a cloud task,
+        the method returns without sending or marking notified so the loop
+        retries on the next interval.  For local-tool tasks a bare completion
+        notice is sent as a final fallback.
+        """
+        result_text: str | None = None
 
         if task.result:
-            # Prefer the structured result stored on the task record.
             result_text = task.result
             if len(result_text) > 4000:
                 result_text = result_text[:4000] + "\n\n…(truncated)"
+            logger.info(
+                "Task #%d: result from task record (%d chars)", task.id, len(result_text)
+            )
         else:
-            # Fall back to inbox file (used by brain outputs, arxiv, etc.)
             inbox = Path(self.settings.brain_inbox)
-            if inbox.exists():
+            if not inbox.exists():
+                logger.warning(
+                    "Task #%d: brain inbox directory missing: %s", task.id, inbox
+                )
+            else:
                 candidates = sorted(
                     inbox.glob(f"{task.id}_*.md"),
                     key=lambda p: p.stat().st_mtime,
@@ -222,6 +256,31 @@ class TelegramProvider:
                     if len(content) > 4000:
                         content = content[:4000] + "\n\n…(truncated)"
                     result_text = content
+                    logger.info(
+                        "Task #%d: result from inbox file %s (%d chars)",
+                        task.id, candidates[0].name, len(result_text),
+                    )
+                else:
+                    logger.debug(
+                        "Task #%d: no %d_*.md files in %s — not ready yet",
+                        task.id, task.id, inbox,
+                    )
+
+        if result_text is None:
+            is_cloud = task.metadata.get("handoff") or (
+                task.tool_name and "\u2192cloud" in task.tool_name
+            )
+            if is_cloud:
+                # Subprocess hasn't written to inbox yet; polling loop will retry.
+                logger.debug("Task #%d: cloud result not ready, will retry", task.id)
+                return
+            # Local tool produced no structured result — send bare notice.
+            tool = task.tool_name or "unknown"
+            result_text = f"Task #{task.id} complete (tool: {tool})."
+            logger.warning(
+                "Task #%d (tool=%s): no result content found; sending bare completion notice",
+                task.id, tool,
+            )
 
         try:
             await bot.send_message(chat_id=task.chat_id, text=result_text)
