@@ -49,13 +49,15 @@ class ArxivTool(BaseTool):
         from tools.memory import MemoryTool
         memory = MemoryTool()
 
+        retrieved_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
         for paper in self._fetched_papers:
             short_id = paper.entry_id.split("/abs/")[-1]
             authors = ", ".join(a.name for a in paper.authors[:5])
             content = (
                 f"{paper.title}\n\n"
                 f"Authors: {authors}\n"
-                f"Published: {paper.published.strftime('%Y-%m-%d') if paper.published else 'unknown'}\n\n"
+                f"Published: {paper.published.strftime('%Y-%m-%d') if paper.published else 'unknown'}\n"
+                f"Retrieved: {retrieved_at}\n\n"
                 f"{paper.summary.replace(chr(10), ' ').strip()}"
             )
             # _store handles dedup internally (logs duplicates at INFO level)
